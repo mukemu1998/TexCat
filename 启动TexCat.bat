@@ -1,14 +1,44 @@
 @echo off
 setlocal
-set "PYTHONW_EXE=C:\Users\HKJ\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\pythonw.exe"
-set "PYTHON_EXE=C:\Users\HKJ\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
-set "TCL_LIBRARY=C:/Users/HKJ/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/tcl/tcl8.6"
-set "TK_LIBRARY=C:/Users/HKJ/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/tcl/tk8.6"
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('python.exe','pythonw.exe') -and $_.CommandLine -like '*texture_toolbox.py*--web*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>nul
-if exist "%PYTHONW_EXE%" (
-    start "" "%PYTHONW_EXE%" "%~dp0src\texture_toolbox.py" --web
+
+set "PYTHON_CMD="
+set "PYTHON_ARGS="
+
+where pythonw.exe >nul 2>nul
+if not errorlevel 1 (
+    set "PYTHON_CMD=pythonw.exe"
 ) else (
-    start "" "%PYTHON_EXE%" "%~dp0src\texture_toolbox.py" --web
+    where pyw.exe >nul 2>nul
+    if not errorlevel 1 (
+        set "PYTHON_CMD=pyw.exe"
+        set "PYTHON_ARGS=-3"
+    ) else (
+        where python.exe >nul 2>nul
+        if not errorlevel 1 (
+            set "PYTHON_CMD=python.exe"
+        ) else (
+            where py.exe >nul 2>nul
+            if not errorlevel 1 (
+                set "PYTHON_CMD=py.exe"
+                set "PYTHON_ARGS=-3"
+            )
+        )
+    )
+)
+
+if not defined PYTHON_CMD (
+    echo 未找到 Python。请先安装 Python 3.10+，并执行：
+    echo py -3 -m pip install -r requirements.txt
+    pause
+    exit /b 1
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('python.exe','pythonw.exe') -and $_.CommandLine -like '*texture_toolbox.py*--web*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>nul
+
+if defined PYTHON_ARGS (
+    start "" "%PYTHON_CMD%" %PYTHON_ARGS% "%~dp0src\texture_toolbox.py" --web
+) else (
+    start "" "%PYTHON_CMD%" "%~dp0src\texture_toolbox.py" --web
 )
 exit /b

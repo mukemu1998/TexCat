@@ -2,11 +2,19 @@
 
 一个面向游戏贴图项目的本地浏览器工具箱。默认入口是网页拖拽界面，支持把图片或文件夹拖入页面后批量处理。
 
-## 启动
+## 安装和启动
 
-双击：
+TexCat 当前以源码方式运行，建议使用 Python 3.10 或更新版本。
 
-```bat
+```powershell
+git clone https://github.com/mukemu1998/TexCat.git
+cd TexCat
+py -3 -m pip install -r requirements.txt
+```
+
+Windows 下可以直接双击：
+
+```text
 启动TexCat.bat
 ```
 
@@ -14,6 +22,12 @@
 
 ```text
 无黑窗启动TexCat.vbs
+```
+
+也可以用命令行启动：
+
+```powershell
+py -3 src/texture_toolbox.py --web
 ```
 
 启动后浏览器会打开本地页面。关闭工具箱浏览器窗口后，后台本地服务会在心跳断开后自动退出；点击页面左上角的圆形电源图标 `退出工具箱` 会立即停止当前所有工具箱服务。电源图标下方的齿轮按钮可打开个性化设置，切换明暗模式、色系和 UI 圆角滑杆；默认主题为 `暗色 + 红 + 圆角 1.0`。左侧栏在空间足够时固定显示备忘录和日志，窗口过窄时自动移到页面下方；`清空日志` 只会清空当前页面日志，不影响待处理文件列表。`assets/TexCat.png` 用于网页图标，`assets/TexCat.ico` 用于以后 exe 打包或快捷方式图标。
@@ -175,6 +189,16 @@ Packed_R.png
 
 ## 技术说明
 
-- 主入口是 [texture_toolbox.py](/C:/Users/HKJ/Desktop/work/TexCat/src/texture_toolbox.py)。
-- [texture_resizer.py](/C:/Users/HKJ/Desktop/work/TexCat/src/texture_resizer.py) 保留为图像大小模块的核心实现。
+- 主入口是 [texture_toolbox.py](src/texture_toolbox.py)。
+- [texture_resizer.py](src/texture_resizer.py) 保留为图像大小模块的核心实现。
 - 默认使用浏览器拖放入口，避免 Tk 窗口在部分 Windows 环境中拖入文件时闪退。
+
+## 分支和版本
+
+- `main`：稳定版本，适合普通使用者下载。
+- `dev/v1.02`：开发版本，包含工作流模式 Beta 等仍在迭代的功能。
+- 稳定回滚点会用 Git tag 标记，例如 `v1.01`。
+
+## 开源许可
+
+TexCat 使用 [MIT License](LICENSE) 开源。你可以自由使用、修改和分发；如果把修改版继续发布，请保留许可证文本和版权声明。
