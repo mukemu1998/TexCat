@@ -4,6 +4,12 @@
 
 ## 启动
 
+当前本地维护目录：
+
+```text
+E:\GITHUB\TexCat
+```
+
 双击：
 
 ```bat
@@ -175,6 +181,6 @@ Packed_R.png
 
 ## 技术说明
 
-- 主入口是 [texture_toolbox.py](/C:/Users/HKJ/Desktop/work/TexCat/src/texture_toolbox.py)。
-- [texture_resizer.py](/C:/Users/HKJ/Desktop/work/TexCat/src/texture_resizer.py) 保留为图像大小模块的核心实现。
+- 主入口是 [texture_toolbox.py](src/texture_toolbox.py)。
+- [texture_resizer.py](src/texture_resizer.py) 保留为图像大小模块的核心实现。
 - 默认使用浏览器拖放入口，避免 Tk 窗口在部分 Windows 环境中拖入文件时闪退。
