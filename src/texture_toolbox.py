@@ -373,6 +373,56 @@ h1 { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: 0; }
   padding-top: 10px;
   border-top: 1px solid var(--border);
 }
+.workflow-detail-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}
+.workflow-detail-note {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.workflow-param-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-limited);
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg));
+}
+.workflow-param-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.workflow-param-grid label,
+.workflow-size-options label {
+  min-width: 0;
+}
+.workflow-size-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.workflow-param-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.workflow-param-list {
+  display: grid;
+  gap: 6px;
+}
+.workflow-param-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.workflow-param-list span:first-child { color: var(--muted); }
 .workflow-json-status {
   min-height: 20px;
   margin-top: 10px;
@@ -1804,7 +1854,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
         <strong>工作流模式 Beta</strong>
         <div class="muted">第一阶段只搭建界面壳和流程位置，不执行真实处理；快速工具模式保持可用。</div>
       </div>
-      <span class="workflow-badge">阶段 1 / 设计壳</span>
+      <span class="workflow-badge">阶段 3 / 参数接入 Beta</span>
     </div>
     <div class="workflow-grid">
       <div class="workflow-column">
@@ -1837,14 +1887,14 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <button id="workflow-load" class="secondary" type="button">载入工作流 JSON</button>
           <input id="workflow-load-input" type="file" accept=".json,application/json" hidden>
         </div>
-        <div id="workflow-json-status" class="workflow-json-status muted">当前步骤只保存结构和参数占位，不执行真实处理。</div>
+        <div id="workflow-json-status" class="workflow-json-status muted">当前步骤会保存真实参数配置，暂不执行完整工作流处理。</div>
       </div>
       <div class="workflow-column">
         <div class="workflow-column-title">参数与输出摘要</div>
         <div class="muted">选中步骤后这里显示参数占位；未选中时显示最终输出摘要。当前不执行真实处理。</div>
         <div id="workflow-detail" class="workflow-detail">
           <strong id="workflow-detail-title">未选中步骤</strong>
-          <div id="workflow-detail-body" class="muted">添加或选择一个步骤后，这里会显示该步骤的默认参数和后续实现范围。</div>
+          <div id="workflow-detail-body" class="workflow-detail-body">添加或选择一个步骤后，这里会显示该步骤的参数设置。</div>
         </div>
         <div id="workflow-output-summary" class="workflow-summary">
           <div><span>输入资源</span><strong id="workflow-summary-inputs">0</strong></div>
@@ -2396,12 +2446,12 @@ const workflowStepDefinitions = {
   resize: {
     label: "缩放尺寸",
     summary: "选择目标尺寸，生成多级贴图输出。",
-    detail: "参数占位：目标尺寸、锁定比例、缩放算法、尺寸后缀。后续会复用图像大小模块。"
+    detail: "复用图像大小模块的尺寸、缩放配置、输出格式、锁定比例和尺寸后缀参数。"
   },
   export: {
     label: "格式与压缩",
     summary: "设置输出格式、无损优先和有损质量。",
-    detail: "参数占位：输出格式、质量、无损优先、Alpha 丢失提醒。后续会整合格式转换和高质量压缩。"
+    detail: "复用格式转换和高质量压缩模块的输出格式、质量和无损优先策略。"
   },
   crop: {
     label: "图片裁切",
@@ -2431,9 +2481,129 @@ const workflowStepDefinitions = {
   rename: {
     label: "命名规则",
     summary: "为最终输出文件叠加命名规则。",
-    detail: "参数占位：查找替换、前缀、后缀、中间插入、{name}/{type}/{size}/{channel}/{index}。"
+    detail: "复用批量重命名模块的步骤叠加规则，保存查找替换、前缀、后缀和中间插入参数。"
   }
 };
+const workflowSizeValues = [8192, 4096, 2048, 1024, 512, 256];
+const workflowFormatValues = ["psd", "png", "tga", "tif", "tiff", "jpg", "jpeg", "dds", "webp", "bmp"];
+const workflowFormatLabels = {
+  keep: "保持原格式",
+  psd: "PSD",
+  png: "PNG",
+  tga: "TGA",
+  tif: "TIF",
+  tiff: "TIFF",
+  jpg: "JPG",
+  jpeg: "JPEG",
+  dds: "DDS",
+  webp: "WEBP",
+  bmp: "BMP",
+};
+const workflowProfileLabels = {
+  detail: "detail - 颜色贴图/细节保留",
+  data: "data - 法线/遮罩/数据贴图",
+  pixel: "pixel - 像素风/硬边",
+};
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
+}
+function workflowOptionHtml(values, labels, selected) {
+  return values.map(value => `<option value="${escapeHtml(value)}"${String(selected) === String(value) ? " selected" : ""}>${escapeHtml(labels[value] || String(value).toUpperCase())}</option>`).join("");
+}
+function workflowFormatOptionHtml(selected, includeKeep = true) {
+  return workflowOptionHtml(includeKeep ? ["keep", ...workflowFormatValues] : workflowFormatValues, workflowFormatLabels, selected);
+}
+function workflowSizeLabel(size) {
+  const labels = { 8192: "8K", 4096: "4K", 2048: "2K", 1024: "1K", 512: "512", 256: "256" };
+  return labels[size] || `${size}`;
+}
+function workflowNormalizeSizes(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const sizes = [];
+  for (const item of value) {
+    const size = Number(item);
+    if (Number.isFinite(size) && size > 0 && !seen.has(size)) {
+      seen.add(size);
+      sizes.push(size);
+    }
+  }
+  return sizes;
+}
+function workflowDefaultRenameStep() {
+  return { op: "replace", find: "", replace: "", prefix: "", suffix: "", left: "", right: "", insert: "" };
+}
+function workflowDefaultOptions(type) {
+  if (type === "resize") {
+    return { sizes: [], custom: "", profile: "detail", format: "keep", preserve: true, append_size_suffix: true };
+  }
+  if (type === "export") {
+    return { format: "png", quality: 95, lossless: true };
+  }
+  if (type === "rename") {
+    return { format: "keep", steps: [workflowDefaultRenameStep()] };
+  }
+  return {};
+}
+function workflowMergeOptions(type, options) {
+  const defaults = workflowDefaultOptions(type);
+  const merged = { ...defaults, ...(options && typeof options === "object" ? options : {}) };
+  if (type === "resize") {
+    merged.sizes = workflowNormalizeSizes(merged.sizes);
+    merged.custom = String(merged.custom || "");
+    merged.profile = workflowProfileLabels[merged.profile] ? merged.profile : "detail";
+    merged.format = merged.format === "keep" || workflowFormatValues.includes(merged.format) ? merged.format : "keep";
+    merged.preserve = merged.preserve !== false;
+    merged.append_size_suffix = merged.append_size_suffix !== false;
+  } else if (type === "export") {
+    merged.format = workflowFormatValues.includes(merged.format) ? merged.format : "png";
+    merged.quality = Math.max(80, Math.min(100, Math.round(Number(merged.quality) || 95)));
+    merged.lossless = merged.lossless !== false;
+  } else if (type === "rename") {
+    merged.format = merged.format === "keep" || workflowFormatValues.includes(merged.format) ? merged.format : "keep";
+    merged.steps = Array.isArray(merged.steps) && merged.steps.length ? merged.steps.map(step => ({ ...workflowDefaultRenameStep(), ...(step || {}) })) : [workflowDefaultRenameStep()];
+  }
+  return merged;
+}
+function currentResizeWorkflowOptions() {
+  return workflowMergeOptions("resize", {
+    sizes: [...document.querySelectorAll('input[name="size"]:checked')].map(input => Number(input.value)),
+    custom: document.getElementById("resize-custom").value.trim(),
+    profile: document.getElementById("resize-profile").value,
+    format: document.getElementById("resize-format").value,
+    preserve: document.getElementById("resize-preserve").checked,
+    append_size_suffix: document.getElementById("resize-size-suffix").checked,
+  });
+}
+function currentExportWorkflowOptions() {
+  return workflowMergeOptions("export", {
+    format: document.getElementById("convert-format").value || document.getElementById("compress-format").value,
+    quality: Number(compressQuality.value) || 95,
+    lossless: document.getElementById("compress-lossless").checked,
+  });
+}
+function currentRenameWorkflowOptions() {
+  return workflowMergeOptions("rename", {
+    format: document.getElementById("rename-format").value,
+    steps: getRenameSteps(),
+  });
+}
+function workflowInitialOptions(type) {
+  try {
+    if (type === "resize") return currentResizeWorkflowOptions();
+    if (type === "export") return currentExportWorkflowOptions();
+    if (type === "rename") return currentRenameWorkflowOptions();
+  } catch (_error) {
+    return workflowDefaultOptions(type);
+  }
+  return workflowDefaultOptions(type);
+}
 function workflowStepDefinition(type) {
   return workflowStepDefinitions[type] || workflowStepDefinitions.resize;
 }
@@ -2445,7 +2615,7 @@ function createWorkflowStep(type) {
     enabled: true,
     label: definition.label,
     summary: definition.summary,
-    options: {},
+    options: workflowInitialOptions(type),
   };
 }
 function normalizeWorkflowStep(raw, index) {
@@ -2457,8 +2627,30 @@ function normalizeWorkflowStep(raw, index) {
     enabled: raw && typeof raw.enabled === "boolean" ? raw.enabled : true,
     label: raw && typeof raw.label === "string" && raw.label ? raw.label : definition.label,
     summary: raw && typeof raw.summary === "string" && raw.summary ? raw.summary : definition.summary,
-    options: raw && raw.options && typeof raw.options === "object" ? raw.options : {},
+    options: workflowMergeOptions(type, raw && raw.options && typeof raw.options === "object" ? raw.options : {}),
   };
+}
+function workflowResizeSizeParts(options) {
+  const sizes = workflowNormalizeSizes(options.sizes).map(workflowSizeLabel);
+  const custom = String(options.custom || "").split(/[;,]/).map(value => value.trim()).filter(Boolean);
+  return sizes.concat(custom);
+}
+function workflowStepSummary(step) {
+  const definition = workflowStepDefinition(step.type);
+  const options = workflowMergeOptions(step.type, step.options);
+  if (step.type === "resize") {
+    const sizeText = workflowResizeSizeParts(options).join(" / ") || "未选择尺寸";
+    const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
+    return `${sizeText}，${workflowProfileLabels[options.profile].split(" - ")[0]}，${formatText}${options.append_size_suffix ? "，尺寸后缀" : ""}`;
+  }
+  if (step.type === "export") {
+    const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
+    return `${formatText}，质量 ${options.quality}，${options.lossless ? "无损优先" : "有损高质量"}`;
+  }
+  if (step.type === "rename") {
+    return `${options.steps.length} 个命名步骤，${workflowFormatLabels[options.format] || options.format.toUpperCase()}`;
+  }
+  return step.summary || definition.summary;
 }
 function selectedWorkflowStep() {
   return workflowSteps.find(step => step.id === workflowSelectedStepId) || null;
@@ -2554,22 +2746,238 @@ function renderWorkflowSteps() {
     head.appendChild(controls);
     const summary = document.createElement("div");
     summary.className = "muted";
-    summary.textContent = `${step.enabled ? "参与流程" : "已停用"} | ${step.summary || definition.summary}`;
+    summary.textContent = `${step.enabled ? "参与流程" : "已停用"} | ${workflowStepSummary(step)}`;
     card.appendChild(head);
     card.appendChild(summary);
     workflowStepList.appendChild(card);
   });
 }
+function updateWorkflowSummary() {
+  if (!workflowOutputSummary) return;
+  const items = workflowInputItems();
+  workflowSummaryInputs.textContent = String(items.length);
+  workflowSummarySteps.textContent = String(workflowSteps.length);
+  const activeSteps = workflowSteps.filter(step => step.enabled);
+  let outputMultiplier = 1;
+  for (const step of activeSteps) {
+    if (step.type === "resize") {
+      const options = workflowMergeOptions("resize", step.options);
+      outputMultiplier = Math.max(outputMultiplier, Math.max(1, workflowResizeSizeParts(options).length));
+    }
+  }
+  workflowSummaryOutputs.textContent = items.length ? `约 ${items.length * outputMultiplier} 个输出（Beta估算）` : "待接入";
+  const renameStep = activeSteps.find(step => step.type === "rename");
+  workflowSummaryNaming.textContent = renameStep ? workflowStepSummary(renameStep) : "待接入";
+  workflowSummaryConflicts.textContent = activeSteps.length ? "执行前统一检查" : "待接入";
+  const exportStep = activeSteps.find(step => step.type === "export");
+  workflowSummaryExport.textContent = exportStep ? workflowStepSummary(exportStep) : "复用全局设置";
+}
+function refreshWorkflowAfterOptionChange(step, message = "工作流步骤参数已更新。") {
+  step.options = workflowMergeOptions(step.type, step.options);
+  step.summary = workflowStepSummary(step);
+  renderWorkflowSteps();
+  updateWorkflowSummary();
+  if (message) workflowStatus(message);
+}
+function appendWorkflowDetailNote(definition) {
+  const note = document.createElement("div");
+  note.className = "workflow-detail-note";
+  note.textContent = definition.detail;
+  workflowDetailBody.appendChild(note);
+}
+function renderWorkflowResizeDetail(step) {
+  step.options = workflowMergeOptions("resize", step.options);
+  const options = step.options;
+  const card = document.createElement("div");
+  card.className = "workflow-param-card";
+  const sizeControls = workflowSizeValues.map(size => `
+    <label><input type="checkbox" data-workflow-size value="${size}"${options.sizes.includes(size) ? " checked" : ""}>${workflowSizeLabel(size)}</label>
+  `).join("");
+  card.innerHTML = `
+    <div class="workflow-param-actions">
+      <button class="secondary" type="button" data-workflow-sync>读取当前图像大小模块设置</button>
+      <span class="muted">用于把快速工具里已经调好的参数同步进此步骤。</span>
+    </div>
+    <div class="workflow-size-options">
+      <span class="row-title">目标尺寸</span>
+      ${sizeControls}
+    </div>
+    <div class="workflow-param-grid">
+      <label>自定义尺寸 <input data-workflow-custom type="text" value="${escapeHtml(options.custom)}" placeholder="1536,768"></label>
+      <label>缩放配置
+        <select data-workflow-profile>${workflowOptionHtml(Object.keys(workflowProfileLabels), workflowProfileLabels, options.profile)}</select>
+      </label>
+      <label>输出格式
+        <select data-workflow-format>${workflowFormatOptionHtml(options.format, true)}</select>
+      </label>
+    </div>
+    <div class="workflow-size-options">
+      <label><input data-workflow-preserve type="checkbox"${options.preserve ? " checked" : ""}>锁定比例</label>
+      <label><input data-workflow-size-suffix type="checkbox"${options.append_size_suffix ? " checked" : ""}>添加尺寸后缀</label>
+    </div>
+  `;
+  const apply = () => {
+    step.options = workflowMergeOptions("resize", {
+      sizes: [...card.querySelectorAll("[data-workflow-size]:checked")].map(input => Number(input.value)),
+      custom: card.querySelector("[data-workflow-custom]").value.trim(),
+      profile: card.querySelector("[data-workflow-profile]").value,
+      format: card.querySelector("[data-workflow-format]").value,
+      preserve: card.querySelector("[data-workflow-preserve]").checked,
+      append_size_suffix: card.querySelector("[data-workflow-size-suffix]").checked,
+    });
+    refreshWorkflowAfterOptionChange(step);
+  };
+  card.querySelector("[data-workflow-sync]").onclick = () => {
+    step.options = currentResizeWorkflowOptions();
+    workflowStatus("已读取当前图像大小模块设置。");
+    renderWorkflowShell();
+  };
+  card.querySelectorAll("input, select").forEach(input => {
+    input.oninput = apply;
+    input.onchange = apply;
+  });
+  workflowDetailBody.appendChild(card);
+}
+function renderWorkflowExportDetail(step) {
+  step.options = workflowMergeOptions("export", step.options);
+  const options = step.options;
+  const card = document.createElement("div");
+  card.className = "workflow-param-card";
+  card.innerHTML = `
+    <div class="workflow-param-actions">
+      <button class="secondary" type="button" data-workflow-sync>读取当前格式/压缩模块设置</button>
+      <span class="muted">格式来自格式转换模块，质量和无损优先来自高质量压缩模块。</span>
+    </div>
+    <div class="workflow-param-grid">
+      <label>输出格式
+        <select data-workflow-format>${workflowFormatOptionHtml(options.format, false)}</select>
+      </label>
+      <label>有损格式质量
+        <input data-workflow-quality type="range" min="80" max="100" step="1" value="${options.quality}">
+        <strong data-workflow-quality-value>${options.quality}</strong>
+      </label>
+      <label><input data-workflow-lossless type="checkbox"${options.lossless ? " checked" : ""}>无损优先</label>
+    </div>
+    <div class="muted">JPG/JPEG 仍然是有损格式且不保留 Alpha；DDS 仍使用当前运行时能力，不承诺 BC 系列游戏压缩编码。</div>
+  `;
+  const qualityValue = card.querySelector("[data-workflow-quality-value]");
+  const apply = () => {
+    const quality = Math.round(Number(card.querySelector("[data-workflow-quality]").value) || 95);
+    qualityValue.textContent = String(quality);
+    step.options = workflowMergeOptions("export", {
+      format: card.querySelector("[data-workflow-format]").value,
+      quality,
+      lossless: card.querySelector("[data-workflow-lossless]").checked,
+    });
+    refreshWorkflowAfterOptionChange(step);
+  };
+  card.querySelector("[data-workflow-sync]").onclick = () => {
+    step.options = currentExportWorkflowOptions();
+    workflowStatus("已读取当前格式转换和高质量压缩模块设置。");
+    renderWorkflowShell();
+  };
+  card.querySelectorAll("input, select").forEach(input => {
+    input.oninput = apply;
+    input.onchange = apply;
+  });
+  workflowDetailBody.appendChild(card);
+}
+function workflowRenameOpLabel(op) {
+  return {
+    replace: "查找替换",
+    prefix: "添加前缀/项目名",
+    suffix: "添加后缀",
+    insert: "中间插入文本",
+  }[op] || "命名步骤";
+}
+function workflowRenameStepDescription(step) {
+  if (step.op === "replace") return `${step.find || "空"} -> ${step.replace || "空"}`;
+  if (step.op === "prefix") return `前缀：${step.prefix || "空"}`;
+  if (step.op === "suffix") return `后缀：${step.suffix || "空"}`;
+  if (step.op === "insert") return `${step.left || "左侧为空"} + ${step.insert || "插入为空"} + ${step.right || "右侧为空"}`;
+  return "未设置";
+}
+function renderWorkflowRenameDetail(step) {
+  step.options = workflowMergeOptions("rename", step.options);
+  const options = step.options;
+  const card = document.createElement("div");
+  card.className = "workflow-param-card";
+  card.innerHTML = `
+    <div class="workflow-param-actions">
+      <button class="secondary" type="button" data-workflow-sync>读取当前批量重命名模块规则</button>
+      <span class="muted">先在快速工具模式的批量重命名里编辑步骤，再同步到工作流。</span>
+    </div>
+    <div class="workflow-param-grid">
+      <label>输出格式
+        <select data-workflow-format>${workflowFormatOptionHtml(options.format, true)}</select>
+      </label>
+    </div>
+    <div class="workflow-param-list" data-workflow-rename-list></div>
+  `;
+  const list = card.querySelector("[data-workflow-rename-list]");
+  options.steps.forEach((renameStep, index) => {
+    const row = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = `步骤 ${index + 1}：${workflowRenameOpLabel(renameStep.op)}`;
+    const value = document.createElement("strong");
+    value.textContent = workflowRenameStepDescription(renameStep);
+    row.appendChild(label);
+    row.appendChild(value);
+    list.appendChild(row);
+  });
+  card.querySelector("[data-workflow-format]").onchange = event => {
+    step.options = workflowMergeOptions("rename", { ...step.options, format: event.target.value });
+    refreshWorkflowAfterOptionChange(step);
+  };
+  card.querySelector("[data-workflow-sync]").onclick = () => {
+    step.options = currentRenameWorkflowOptions();
+    workflowStatus("已读取当前批量重命名模块规则。");
+    renderWorkflowShell();
+  };
+  workflowDetailBody.appendChild(card);
+}
+function renderWorkflowPendingDetail(step) {
+  const options = step.options && Object.keys(step.options).length ? step.options : {};
+  const card = document.createElement("div");
+  card.className = "workflow-param-card";
+  const title = document.createElement("strong");
+  title.textContent = "后续阶段接入";
+  const text = document.createElement("div");
+  text.className = "muted";
+  text.textContent = "这个步骤需要预览状态或中间图数据，当前先保留在工作流结构中，不开放真实参数编辑。";
+  card.appendChild(title);
+  card.appendChild(text);
+  if (Object.keys(options).length) {
+    const pre = document.createElement("pre");
+    pre.className = "muted";
+    pre.textContent = JSON.stringify(options, null, 2);
+    card.appendChild(pre);
+  }
+  workflowDetailBody.appendChild(card);
+}
 function renderWorkflowDetail() {
   const step = selectedWorkflowStep();
+  workflowDetailBody.innerHTML = "";
   if (!step) {
     workflowDetailTitle.textContent = "未选中步骤";
-    workflowDetailBody.textContent = workflowSteps.length ? "选择一个步骤后，这里会显示该步骤的参数占位和后续接入范围。" : "添加一个步骤后，这里会显示该步骤的默认参数和后续实现范围。";
+    const empty = document.createElement("div");
+    empty.className = "workflow-detail-note";
+    empty.textContent = workflowSteps.length ? "选择一个步骤后，这里会显示该步骤的参数设置。" : "添加一个步骤后，这里会显示该步骤的默认参数和后续实现范围。";
+    workflowDetailBody.appendChild(empty);
     return;
   }
   const definition = workflowStepDefinition(step.type);
   workflowDetailTitle.textContent = `${step.label || definition.label}`;
-  workflowDetailBody.textContent = definition.detail;
+  appendWorkflowDetailNote(definition);
+  if (step.type === "resize") {
+    renderWorkflowResizeDetail(step);
+  } else if (step.type === "export") {
+    renderWorkflowExportDetail(step);
+  } else if (step.type === "rename") {
+    renderWorkflowRenameDetail(step);
+  } else {
+    renderWorkflowPendingDetail(step);
+  }
 }
 function workflowPayload() {
   return {
@@ -2592,8 +3000,8 @@ function workflowPayload() {
       type: step.type,
       enabled: step.enabled,
       label: step.label,
-      summary: step.summary,
-      options: step.options || {},
+      summary: workflowStepSummary(step),
+      options: workflowMergeOptions(step.type, step.options),
     })),
   };
 }
@@ -2663,15 +3071,7 @@ function renderWorkflowShell() {
       workflowResourceList.appendChild(more);
     }
   }
-  if (workflowOutputSummary) {
-    workflowSummaryInputs.textContent = String(items.length);
-    workflowSummarySteps.textContent = String(workflowSteps.length);
-    const activeSteps = workflowSteps.filter(step => step.enabled).length;
-    workflowSummaryOutputs.textContent = items.length ? `${items.length} 个输入，${activeSteps} 个启用步骤` : "待接入";
-    workflowSummaryNaming.textContent = workflowSteps.some(step => step.type === "rename" && step.enabled) ? "已包含命名规则步骤" : "待接入";
-    workflowSummaryConflicts.textContent = "执行前统一检查";
-    workflowSummaryExport.textContent = workflowSteps.some(step => step.type === "export" && step.enabled) ? "由格式与压缩步骤控制" : "复用全局设置";
-  }
+  updateWorkflowSummary();
   renderWorkflowSteps();
   renderWorkflowDetail();
 }
