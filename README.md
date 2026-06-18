@@ -2,6 +2,10 @@
 
 一个面向游戏贴图项目的本地浏览器工具箱。默认入口是网页拖拽界面，支持把图片或文件夹拖入页面后批量处理。
 
+<p align="center">
+  <img src="assets/TexCat.png" alt="TexCat logo">
+</p>
+
 ## 安装和启动
 
 TexCat 当前以源码方式运行，建议使用 Python 3.10 或更新版本。
