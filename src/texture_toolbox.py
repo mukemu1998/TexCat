@@ -33,7 +33,7 @@ import texture_resizer as core
 
 IMAGE_EXTENSIONS = core.IMAGE_EXTENSIONS
 OUTPUT_FORMATS = ("psd", "png", "tga", "tif", "tiff", "jpg", "jpeg", "dds", "webp", "bmp")
-APP_VERSION = "v1.01"
+APP_VERSION = "v1.02-dev"
 
 
 def app_root() -> Path:
@@ -238,6 +238,112 @@ h1 { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: 0; }
 .tab.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); }
 .tool { display: none; }
 .tool.active { display: block; }
+.mode-switch {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+.mode-button {
+  min-width: 148px;
+  border-color: var(--border);
+  background: var(--control);
+  color: var(--text);
+}
+.mode-button.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
+}
+.mode-view[hidden] { display: none; }
+.workflow-shell { padding: 18px; }
+.workflow-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--primary) 18%, var(--panel-soft));
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.workflow-grid {
+  display: grid;
+  grid-template-columns: minmax(190px, .9fr) minmax(280px, 1.1fr) minmax(260px, 1fr);
+  gap: 18px;
+  margin-top: 16px;
+}
+.workflow-column {
+  min-width: 0;
+  padding: 0 12px;
+  border-left: 1px solid var(--border);
+}
+.workflow-column:first-child { border-left: 0; padding-left: 0; }
+.workflow-column-title {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.workflow-list {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid var(--border);
+}
+.workflow-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+.workflow-row strong { display: block; margin-bottom: 4px; }
+.workflow-row.disabled { opacity: .68; }
+.workflow-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflow-step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+.workflow-empty {
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+.workflow-summary {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.workflow-summary div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.workflow-summary span:first-child { color: var(--muted); }
+@media (max-width: 980px) {
+  .workflow-grid { grid-template-columns: 1fr; }
+  .workflow-column { border-left: 0; border-top: 1px solid var(--border); padding: 14px 0 0; }
+  .workflow-column:first-child { border-top: 0; padding-top: 0; }
+}
 .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 10px 0; }
 label { display: inline-flex; align-items: center; gap: 6px; }
 input[type="text"], input[type="number"], select {
@@ -1036,6 +1142,11 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     </div>
     </div>
   </header>
+  <div class="mode-switch" role="tablist" aria-label="TexCat模式切换">
+    <button id="mode-quick" class="mode-button active" type="button" data-mode="quick" role="tab" aria-selected="true">快速工具模式</button>
+    <button id="mode-workflow" class="mode-button" type="button" data-mode="workflow" role="tab" aria-selected="false">工作流模式 Beta</button>
+  </div>
+  <div id="quick-mode-view" class="mode-view active">
   <section id="drop" class="panel">
     <div>
       <strong>把 PSD / PNG / TGA / TIF / JPG / DDS / WEBP / BMP 图片或文件夹拖到这里</strong>
@@ -1635,6 +1746,51 @@ button:disabled { opacity: .55; cursor: not-allowed; }
       <div id="run-status" class="run-status muted">等待执行。</div>
     </div>
   </section>
+  </div>
+  <section id="workflow-mode-view" class="mode-view panel workflow-shell" hidden>
+    <div class="section-head">
+      <div>
+        <strong>工作流模式 Beta</strong>
+        <div class="muted">第一阶段只搭建界面壳和流程位置，不执行真实处理；快速工具模式保持可用。</div>
+      </div>
+      <span class="workflow-badge">阶段 1 / 设计壳</span>
+    </div>
+    <div class="workflow-grid">
+      <div class="workflow-column">
+        <div class="workflow-column-title">资源池</div>
+        <div id="workflow-resource-summary" class="muted">尚未添加图片。</div>
+        <div id="workflow-resource-list" class="workflow-list" aria-live="polite">
+          <div class="workflow-empty">拖入或选择图片后，这里会同步显示工作流输入资源。</div>
+        </div>
+      </div>
+      <div class="workflow-column">
+        <div class="workflow-column-title">处理步骤</div>
+        <div class="workflow-empty">当前版本只保留工作流容器，下一阶段会接入添加、删除、上移、下移和保存/载入 JSON。</div>
+        <div class="workflow-list" style="margin-top:12px;">
+          <div class="workflow-row disabled"><strong><span class="workflow-step-number">1</span>导入贴图</strong><span class="muted">复用当前拖入/选择列表和自定义输入目录。</span></div>
+          <div class="workflow-row disabled"><strong><span class="workflow-step-number">2</span>检查贴图</strong><span class="muted">后续显示尺寸、格式、通道、Alpha、位深和贴图类型。</span></div>
+          <div class="workflow-row disabled"><strong><span class="workflow-step-number">3</span>添加处理步骤</strong><span class="muted">后续支持裁切、缩放、通道打包、生成/调整、命名和导出策略。</span></div>
+          <div class="workflow-row disabled"><strong><span class="workflow-step-number">4</span>预览并导出</strong><span class="muted">后续统一做命名预览、路径预览和同名冲突检查。</span></div>
+        </div>
+        <div class="workflow-actions">
+          <button class="secondary" type="button" disabled>添加步骤</button>
+          <button class="secondary" type="button" disabled>保存工作流</button>
+          <button class="secondary" type="button" disabled>载入工作流</button>
+        </div>
+      </div>
+      <div class="workflow-column">
+        <div class="workflow-column-title">参数与输出摘要</div>
+        <div class="muted">选中步骤后这里显示参数；未选中时显示最终输出摘要。当前为占位预览。</div>
+        <div id="workflow-output-summary" class="workflow-summary">
+          <div><span>预计输出</span><strong>待接入</strong></div>
+          <div><span>命名预览</span><strong>待接入</strong></div>
+          <div><span>冲突检查</span><strong>待接入</strong></div>
+          <div><span>导出策略</span><strong>复用全局设置</strong></div>
+        </div>
+        <div class="notice" style="margin-top:14px;">工作流 Beta 暂不写入输出目录，也不会修改源文件。下一阶段只接步骤数据结构。</div>
+      </div>
+    </div>
+  </section>
 </main>
 <button id="shutdown" class="power-exit" type="button" title="退出工具箱" aria-label="退出工具箱">&#x23FB;</button>
 <button id="personalize" class="personalize-button" type="button" title="个性化设置" aria-label="个性化设置">&#9881;</button>
@@ -1738,6 +1894,12 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 </div>
 <script>
 const allowed = new Set(["psd","png","tga","tif","tiff","jpg","jpeg","dds","webp","bmp"]);
+const modeButtons = document.querySelectorAll(".mode-button");
+const quickModeView = document.getElementById("quick-mode-view");
+const workflowModeView = document.getElementById("workflow-mode-view");
+const workflowResourceSummary = document.getElementById("workflow-resource-summary");
+const workflowResourceList = document.getElementById("workflow-resource-list");
+const workflowOutputSummary = document.getElementById("workflow-output-summary");
 const drop = document.getElementById("drop");
 const picker = document.getElementById("picker");
 const filesBox = document.getElementById("files");
@@ -2140,6 +2302,50 @@ function uploadedFileLabel(file, i) {
 function folderFileLabel(item, i) {
   return `${i + 1}. ${item.relative || item.name} (${fileSizeLabel(item.size)})`;
 }
+function workflowInputItems() {
+  return inputMode() === "folder"
+    ? folderFiles.map((item, i) => ({ name: item.relative || item.name, size: item.size, index: i + 1, source: "自定义目录" }))
+    : files.map((file, i) => ({ name: file.webkitRelativePath || file.name, size: file.size, index: i + 1, source: "拖入/选择" }));
+}
+function renderWorkflowShell() {
+  if (!workflowResourceSummary || !workflowResourceList) return;
+  const items = workflowInputItems();
+  const modeLabel = inputMode() === "folder" ? "自定义输入目录" : "拖入/选择列表";
+  workflowResourceSummary.textContent = items.length
+    ? `${modeLabel}：已准备 ${items.length} 张图片。`
+    : `${modeLabel}：尚未添加图片。`;
+  workflowResourceList.innerHTML = "";
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "workflow-empty";
+    empty.textContent = "拖入、批量选择或扫描目录后，这里会同步显示工作流输入资源。";
+    workflowResourceList.appendChild(empty);
+  } else {
+    const shown = items.slice(0, 12);
+    for (const item of shown) {
+      const row = document.createElement("div");
+      row.className = "workflow-row";
+      const name = document.createElement("strong");
+      name.className = "workflow-row-name";
+      name.textContent = `${item.index}. ${item.name}`;
+      const meta = document.createElement("span");
+      meta.className = "muted";
+      meta.textContent = `${item.source} | ${fileSizeLabel(item.size)}`;
+      row.appendChild(name);
+      row.appendChild(meta);
+      workflowResourceList.appendChild(row);
+    }
+    if (items.length > shown.length) {
+      const more = document.createElement("div");
+      more.className = "workflow-row muted";
+      more.textContent = `还有 ${items.length - shown.length} 张未展开显示。`;
+      workflowResourceList.appendChild(more);
+    }
+  }
+  if (workflowOutputSummary) {
+    workflowOutputSummary.querySelectorAll("strong")[0].textContent = items.length ? `${items.length} 个输入，步骤未接入` : "待接入";
+  }
+}
 function renderFiles() {
   if (inputMode() === "folder") {
     filesBox.textContent = folderFiles.length ? folderFiles.map(folderFileLabel).join("\n") : "自定义输入目录中尚未扫描到支持格式图片。";
@@ -2151,6 +2357,7 @@ function renderFiles() {
   renderNormalPreviewSelector();
   renderPbrPreviewSelector();
   renderCropSelector();
+  renderWorkflowShell();
   if (currentTool === "crop" && cropSourceFile.value !== "") loadCropPreview();
 }
 function renderMergeSelectors() {
@@ -3101,6 +3308,20 @@ function updateInputMode() {
   updateSourceWarning();
 }
 
+function setAppMode(mode) {
+  const workflow = mode === "workflow";
+  quickModeView.hidden = workflow;
+  workflowModeView.hidden = !workflow;
+  quickModeView.classList.toggle("active", !workflow);
+  workflowModeView.classList.toggle("active", workflow);
+  modeButtons.forEach(button => {
+    const active = button.dataset.mode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  if (workflow) renderWorkflowShell();
+}
+
 function rememberVisibleOutputPath() {
   if (outputBox.value && outputBox.value !== outputBox.dataset.default && outputBox.value !== "源文件所在文件夹") {
     customOutputValue = outputBox.value;
@@ -3415,6 +3636,9 @@ function heartbeat() {
 }
 heartbeat();
 setInterval(heartbeat, 5000);
+modeButtons.forEach(button => {
+  button.onclick = () => setAppMode(button.dataset.mode || "quick");
+});
 document.querySelectorAll(".tab").forEach(tab => {
   tab.onclick = () => {
     currentTool = tab.dataset.tool;
@@ -3606,6 +3830,7 @@ updateInputMode();
 updateOutputMode();
 updateChannelPreviewVisibility();
 renderCropCards();
+renderWorkflowShell();
 updateNormalStrengthLabel();
 updateRoughnessLabels();
 updateCompressQualityLabel();
