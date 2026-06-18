@@ -326,6 +326,57 @@ h1 { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: 0; }
   gap: 10px;
   margin-top: 14px;
 }
+.workflow-step-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.workflow-step-toolbar select { min-width: 190px; }
+.workflow-step-card {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.workflow-step-card.active {
+  margin: 0 -10px;
+  padding: 12px 10px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-limited);
+  background: color-mix(in srgb, var(--primary) 12%, var(--panel));
+}
+.workflow-step-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+.workflow-step-title {
+  min-width: 0;
+  font-weight: 650;
+}
+.workflow-step-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.workflow-step-controls button {
+  height: 28px;
+  min-width: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.workflow-detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.workflow-json-status {
+  min-height: 20px;
+  margin-top: 10px;
+}
 .workflow-summary {
   display: grid;
   gap: 8px;
@@ -1765,29 +1816,45 @@ button:disabled { opacity: .55; cursor: not-allowed; }
       </div>
       <div class="workflow-column">
         <div class="workflow-column-title">处理步骤</div>
-        <div class="workflow-empty">当前版本只保留工作流容器，下一阶段会接入添加、删除、上移、下移和保存/载入 JSON。</div>
-        <div class="workflow-list" style="margin-top:12px;">
-          <div class="workflow-row disabled"><strong><span class="workflow-step-number">1</span>导入贴图</strong><span class="muted">复用当前拖入/选择列表和自定义输入目录。</span></div>
-          <div class="workflow-row disabled"><strong><span class="workflow-step-number">2</span>检查贴图</strong><span class="muted">后续显示尺寸、格式、通道、Alpha、位深和贴图类型。</span></div>
-          <div class="workflow-row disabled"><strong><span class="workflow-step-number">3</span>添加处理步骤</strong><span class="muted">后续支持裁切、缩放、通道打包、生成/调整、命名和导出策略。</span></div>
-          <div class="workflow-row disabled"><strong><span class="workflow-step-number">4</span>预览并导出</strong><span class="muted">后续统一做命名预览、路径预览和同名冲突检查。</span></div>
+        <div class="workflow-step-toolbar">
+          <label>步骤类型
+            <select id="workflow-step-type">
+              <option value="resize">缩放尺寸</option>
+              <option value="export">格式与压缩</option>
+              <option value="crop">图片裁切</option>
+              <option value="normal">法线/黑白调整</option>
+              <option value="pbr">PBR辅助生成</option>
+              <option value="split">通道拆分</option>
+              <option value="merge">通道合并/打包</option>
+              <option value="rename">命名规则</option>
+            </select>
+          </label>
+          <button id="workflow-add-step" type="button">添加步骤</button>
         </div>
+        <div id="workflow-step-list" class="workflow-list" aria-live="polite"></div>
         <div class="workflow-actions">
-          <button class="secondary" type="button" disabled>添加步骤</button>
-          <button class="secondary" type="button" disabled>保存工作流</button>
-          <button class="secondary" type="button" disabled>载入工作流</button>
+          <button id="workflow-save" class="secondary" type="button">保存工作流 JSON</button>
+          <button id="workflow-load" class="secondary" type="button">载入工作流 JSON</button>
+          <input id="workflow-load-input" type="file" accept=".json,application/json" hidden>
         </div>
+        <div id="workflow-json-status" class="workflow-json-status muted">当前步骤只保存结构和参数占位，不执行真实处理。</div>
       </div>
       <div class="workflow-column">
         <div class="workflow-column-title">参数与输出摘要</div>
-        <div class="muted">选中步骤后这里显示参数；未选中时显示最终输出摘要。当前为占位预览。</div>
-        <div id="workflow-output-summary" class="workflow-summary">
-          <div><span>预计输出</span><strong>待接入</strong></div>
-          <div><span>命名预览</span><strong>待接入</strong></div>
-          <div><span>冲突检查</span><strong>待接入</strong></div>
-          <div><span>导出策略</span><strong>复用全局设置</strong></div>
+        <div class="muted">选中步骤后这里显示参数占位；未选中时显示最终输出摘要。当前不执行真实处理。</div>
+        <div id="workflow-detail" class="workflow-detail">
+          <strong id="workflow-detail-title">未选中步骤</strong>
+          <div id="workflow-detail-body" class="muted">添加或选择一个步骤后，这里会显示该步骤的默认参数和后续实现范围。</div>
         </div>
-        <div class="notice" style="margin-top:14px;">工作流 Beta 暂不写入输出目录，也不会修改源文件。下一阶段只接步骤数据结构。</div>
+        <div id="workflow-output-summary" class="workflow-summary">
+          <div><span>输入资源</span><strong id="workflow-summary-inputs">0</strong></div>
+          <div><span>处理步骤</span><strong id="workflow-summary-steps">0</strong></div>
+          <div><span>预计输出</span><strong id="workflow-summary-outputs">待接入</strong></div>
+          <div><span>命名预览</span><strong id="workflow-summary-naming">待接入</strong></div>
+          <div><span>冲突检查</span><strong id="workflow-summary-conflicts">待接入</strong></div>
+          <div><span>导出策略</span><strong id="workflow-summary-export">复用全局设置</strong></div>
+        </div>
+        <div class="notice" style="margin-top:14px;">工作流 Beta 暂不写入输出目录，也不会修改源文件。当前阶段只维护步骤结构和 JSON。</div>
       </div>
     </div>
   </section>
@@ -1900,6 +1967,21 @@ const workflowModeView = document.getElementById("workflow-mode-view");
 const workflowResourceSummary = document.getElementById("workflow-resource-summary");
 const workflowResourceList = document.getElementById("workflow-resource-list");
 const workflowOutputSummary = document.getElementById("workflow-output-summary");
+const workflowStepType = document.getElementById("workflow-step-type");
+const workflowAddStep = document.getElementById("workflow-add-step");
+const workflowStepList = document.getElementById("workflow-step-list");
+const workflowSave = document.getElementById("workflow-save");
+const workflowLoad = document.getElementById("workflow-load");
+const workflowLoadInput = document.getElementById("workflow-load-input");
+const workflowJsonStatus = document.getElementById("workflow-json-status");
+const workflowDetailTitle = document.getElementById("workflow-detail-title");
+const workflowDetailBody = document.getElementById("workflow-detail-body");
+const workflowSummaryInputs = document.getElementById("workflow-summary-inputs");
+const workflowSummarySteps = document.getElementById("workflow-summary-steps");
+const workflowSummaryOutputs = document.getElementById("workflow-summary-outputs");
+const workflowSummaryNaming = document.getElementById("workflow-summary-naming");
+const workflowSummaryConflicts = document.getElementById("workflow-summary-conflicts");
+const workflowSummaryExport = document.getElementById("workflow-summary-export");
 const drop = document.getElementById("drop");
 const picker = document.getElementById("picker");
 const filesBox = document.getElementById("files");
@@ -2034,6 +2116,9 @@ let cropDraft = null;
 let cropDragStart = null;
 let cropResizeState = null;
 let cropPreviewMeta = null;
+let workflowSteps = [];
+let workflowSelectedStepId = null;
+let workflowStepSerial = 1;
 const settingsKey = "texture-toolbox-settings-v4";
 const memoKey = "texcat-memo-v1";
 const defaultUiSettings = { tone: "dark", scheme: "red", radius: 1 };
@@ -2307,6 +2392,242 @@ function workflowInputItems() {
     ? folderFiles.map((item, i) => ({ name: item.relative || item.name, size: item.size, index: i + 1, source: "自定义目录" }))
     : files.map((file, i) => ({ name: file.webkitRelativePath || file.name, size: file.size, index: i + 1, source: "拖入/选择" }));
 }
+const workflowStepDefinitions = {
+  resize: {
+    label: "缩放尺寸",
+    summary: "选择目标尺寸，生成多级贴图输出。",
+    detail: "参数占位：目标尺寸、锁定比例、缩放算法、尺寸后缀。后续会复用图像大小模块。"
+  },
+  export: {
+    label: "格式与压缩",
+    summary: "设置输出格式、无损优先和有损质量。",
+    detail: "参数占位：输出格式、质量、无损优先、Alpha 丢失提醒。后续会整合格式转换和高质量压缩。"
+  },
+  crop: {
+    label: "图片裁切",
+    summary: "记录裁切框和多图同位置裁切策略。",
+    detail: "参数占位：单图/多图同位置、自由框选、1:1、自定义像素、九宫格吸附、裁切命名。"
+  },
+  normal: {
+    label: "法线/黑白调整",
+    summary: "调整法线强度或黑白图色阶曲线。",
+    detail: "参数占位：法线 OpenGL/DX、强度、黑白强度、色阶、Gamma、曲线、反相。"
+  },
+  pbr: {
+    label: "PBR辅助生成",
+    summary: "从 Color/Normal/Height 生成辅助贴图。",
+    detail: "参数占位：输入类型、输出目标、强度、半径、细节、平滑、效果叠加。"
+  },
+  split: {
+    label: "通道拆分",
+    summary: "拆出 L/R/G/B/A 通道贴图。",
+    detail: "参数占位：启用通道、通道命名模板、输出格式。后续复用通道拆分模块。"
+  },
+  merge: {
+    label: "通道合并/打包",
+    summary: "将多张图或指定通道打包为 RGB/RGBA。",
+    detail: "参数占位：基础图、目标 R/G/B/A 来源、默认黑白通道、合成图命名。"
+  },
+  rename: {
+    label: "命名规则",
+    summary: "为最终输出文件叠加命名规则。",
+    detail: "参数占位：查找替换、前缀、后缀、中间插入、{name}/{type}/{size}/{channel}/{index}。"
+  }
+};
+function workflowStepDefinition(type) {
+  return workflowStepDefinitions[type] || workflowStepDefinitions.resize;
+}
+function createWorkflowStep(type) {
+  const definition = workflowStepDefinition(type);
+  return {
+    id: `workflow-step-${Date.now()}-${workflowStepSerial++}`,
+    type,
+    enabled: true,
+    label: definition.label,
+    summary: definition.summary,
+    options: {},
+  };
+}
+function normalizeWorkflowStep(raw, index) {
+  const type = raw && workflowStepDefinitions[raw.type] ? raw.type : "resize";
+  const definition = workflowStepDefinition(type);
+  return {
+    id: raw && typeof raw.id === "string" && raw.id ? raw.id : `workflow-step-loaded-${Date.now()}-${index}`,
+    type,
+    enabled: raw && typeof raw.enabled === "boolean" ? raw.enabled : true,
+    label: raw && typeof raw.label === "string" && raw.label ? raw.label : definition.label,
+    summary: raw && typeof raw.summary === "string" && raw.summary ? raw.summary : definition.summary,
+    options: raw && raw.options && typeof raw.options === "object" ? raw.options : {},
+  };
+}
+function selectedWorkflowStep() {
+  return workflowSteps.find(step => step.id === workflowSelectedStepId) || null;
+}
+function workflowStatus(text) {
+  if (workflowJsonStatus) workflowJsonStatus.textContent = text;
+}
+function renderWorkflowSteps() {
+  if (!workflowStepList) return;
+  workflowStepList.innerHTML = "";
+  if (!workflowSteps.length) {
+    const empty = document.createElement("div");
+    empty.className = "workflow-empty";
+    empty.textContent = "尚未添加步骤。先选择一个步骤类型，再点击添加步骤。";
+    workflowStepList.appendChild(empty);
+    return;
+  }
+  workflowSteps.forEach((step, index) => {
+    const definition = workflowStepDefinition(step.type);
+    const card = document.createElement("div");
+    card.className = `workflow-step-card${step.id === workflowSelectedStepId ? " active" : ""}`;
+    card.onclick = event => {
+      if (event.target.closest("button")) return;
+      workflowSelectedStepId = step.id;
+      renderWorkflowShell();
+    };
+    const head = document.createElement("div");
+    head.className = "workflow-step-head";
+    const title = document.createElement("div");
+    title.className = "workflow-step-title";
+    const number = document.createElement("span");
+    number.className = "workflow-step-number";
+    number.textContent = String(index + 1);
+    const titleText = document.createElement("span");
+    titleText.textContent = step.label || definition.label;
+    title.appendChild(number);
+    title.appendChild(titleText);
+    const controls = document.createElement("div");
+    controls.className = "workflow-step-controls";
+    const toggle = document.createElement("button");
+    toggle.className = "secondary";
+    toggle.type = "button";
+    toggle.textContent = step.enabled ? "启用" : "停用";
+    toggle.onclick = () => {
+      step.enabled = !step.enabled;
+      workflowStatus(`${step.label || definition.label} 已${step.enabled ? "启用" : "停用"}。`);
+      renderWorkflowShell();
+    };
+    const up = document.createElement("button");
+    up.className = "secondary";
+    up.type = "button";
+    up.textContent = "上移";
+    up.disabled = index === 0;
+    up.onclick = () => {
+      [workflowSteps[index - 1], workflowSteps[index]] = [workflowSteps[index], workflowSteps[index - 1]];
+      workflowStatus("步骤顺序已调整。");
+      renderWorkflowShell();
+    };
+    const down = document.createElement("button");
+    down.className = "secondary";
+    down.type = "button";
+    down.textContent = "下移";
+    down.disabled = index === workflowSteps.length - 1;
+    down.onclick = () => {
+      [workflowSteps[index], workflowSteps[index + 1]] = [workflowSteps[index + 1], workflowSteps[index]];
+      workflowStatus("步骤顺序已调整。");
+      renderWorkflowShell();
+    };
+    const duplicate = document.createElement("button");
+    duplicate.className = "secondary";
+    duplicate.type = "button";
+    duplicate.textContent = "复制";
+    duplicate.onclick = () => {
+      const copy = normalizeWorkflowStep({ ...step, id: "", label: `${step.label || definition.label} 副本`, options: { ...step.options } }, workflowSteps.length);
+      copy.id = `workflow-step-${Date.now()}-${workflowStepSerial++}`;
+      workflowSteps.splice(index + 1, 0, copy);
+      workflowSelectedStepId = copy.id;
+      workflowStatus("步骤已复制。");
+      renderWorkflowShell();
+    };
+    const del = document.createElement("button");
+    del.className = "secondary";
+    del.type = "button";
+    del.textContent = "删除";
+    del.onclick = () => {
+      workflowSteps.splice(index, 1);
+      if (workflowSelectedStepId === step.id) workflowSelectedStepId = workflowSteps[index]?.id || workflowSteps[index - 1]?.id || null;
+      workflowStatus("步骤已删除。");
+      renderWorkflowShell();
+    };
+    for (const button of [toggle, up, down, duplicate, del]) controls.appendChild(button);
+    head.appendChild(title);
+    head.appendChild(controls);
+    const summary = document.createElement("div");
+    summary.className = "muted";
+    summary.textContent = `${step.enabled ? "参与流程" : "已停用"} | ${step.summary || definition.summary}`;
+    card.appendChild(head);
+    card.appendChild(summary);
+    workflowStepList.appendChild(card);
+  });
+}
+function renderWorkflowDetail() {
+  const step = selectedWorkflowStep();
+  if (!step) {
+    workflowDetailTitle.textContent = "未选中步骤";
+    workflowDetailBody.textContent = workflowSteps.length ? "选择一个步骤后，这里会显示该步骤的参数占位和后续接入范围。" : "添加一个步骤后，这里会显示该步骤的默认参数和后续实现范围。";
+    return;
+  }
+  const definition = workflowStepDefinition(step.type);
+  workflowDetailTitle.textContent = `${step.label || definition.label}`;
+  workflowDetailBody.textContent = definition.detail;
+}
+function workflowPayload() {
+  return {
+    version: 1,
+    app: "TexCat",
+    mode: "workflow-beta",
+    saved_at: new Date().toISOString(),
+    input: {
+      mode: inputMode(),
+      source: inputDir.value,
+      count: workflowInputItems().length,
+    },
+    output: {
+      mode: outputMode(),
+      path: outputBox.value,
+      channel_mode: channelMode.value,
+    },
+    steps: workflowSteps.map(step => ({
+      id: step.id,
+      type: step.type,
+      enabled: step.enabled,
+      label: step.label,
+      summary: step.summary,
+      options: step.options || {},
+    })),
+  };
+}
+function saveWorkflowJson() {
+  const payload = workflowPayload();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `TexCat_workflow_${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  workflowStatus(`已导出工作流 JSON：${payload.steps.length} 个步骤。`);
+}
+function loadWorkflowJsonFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(String(reader.result || "{}"));
+      const steps = Array.isArray(data.steps) ? data.steps.map(normalizeWorkflowStep) : [];
+      workflowSteps = steps;
+      workflowSelectedStepId = workflowSteps[0]?.id || null;
+      workflowStepSerial += workflowSteps.length + 1;
+      workflowStatus(`已载入工作流 JSON：${workflowSteps.length} 个步骤。`);
+      renderWorkflowShell();
+    } catch (error) {
+      workflowStatus(`载入失败：${error.message}`);
+    }
+  };
+  reader.readAsText(file, "utf-8");
+}
 function renderWorkflowShell() {
   if (!workflowResourceSummary || !workflowResourceList) return;
   const items = workflowInputItems();
@@ -2343,8 +2664,16 @@ function renderWorkflowShell() {
     }
   }
   if (workflowOutputSummary) {
-    workflowOutputSummary.querySelectorAll("strong")[0].textContent = items.length ? `${items.length} 个输入，步骤未接入` : "待接入";
+    workflowSummaryInputs.textContent = String(items.length);
+    workflowSummarySteps.textContent = String(workflowSteps.length);
+    const activeSteps = workflowSteps.filter(step => step.enabled).length;
+    workflowSummaryOutputs.textContent = items.length ? `${items.length} 个输入，${activeSteps} 个启用步骤` : "待接入";
+    workflowSummaryNaming.textContent = workflowSteps.some(step => step.type === "rename" && step.enabled) ? "已包含命名规则步骤" : "待接入";
+    workflowSummaryConflicts.textContent = "执行前统一检查";
+    workflowSummaryExport.textContent = workflowSteps.some(step => step.type === "export" && step.enabled) ? "由格式与压缩步骤控制" : "复用全局设置";
   }
+  renderWorkflowSteps();
+  renderWorkflowDetail();
 }
 function renderFiles() {
   if (inputMode() === "folder") {
@@ -3639,6 +3968,19 @@ setInterval(heartbeat, 5000);
 modeButtons.forEach(button => {
   button.onclick = () => setAppMode(button.dataset.mode || "quick");
 });
+workflowAddStep.onclick = () => {
+  const step = createWorkflowStep(workflowStepType.value);
+  workflowSteps.push(step);
+  workflowSelectedStepId = step.id;
+  workflowStatus(`已添加步骤：${step.label}。`);
+  renderWorkflowShell();
+};
+workflowSave.onclick = saveWorkflowJson;
+workflowLoad.onclick = () => workflowLoadInput.click();
+workflowLoadInput.onchange = () => {
+  loadWorkflowJsonFile(workflowLoadInput.files && workflowLoadInput.files[0]);
+  workflowLoadInput.value = "";
+};
 document.querySelectorAll(".tab").forEach(tab => {
   tab.onclick = () => {
     currentTool = tab.dataset.tool;
