@@ -22,12 +22,6 @@ Windows 下可以直接双击：
 启动TexCat.bat
 ```
 
-完全不想看到黑色终端窗口闪一下时，也可以双击：
-
-```text
-无黑窗启动TexCat.vbs
-```
-
 也可以用命令行启动：
 
 ```powershell
