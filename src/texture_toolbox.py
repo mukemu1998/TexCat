@@ -36,7 +36,7 @@ import texture_resizer as core
 
 IMAGE_EXTENSIONS = core.IMAGE_EXTENSIONS
 OUTPUT_FORMATS = ("psd", "png", "tga", "tif", "tiff", "jpg", "jpeg", "dds", "webp", "bmp")
-APP_VERSION = "v1.01"
+APP_VERSION = "v1.01.1"
 
 
 def app_root() -> Path:
