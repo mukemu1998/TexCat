@@ -20,7 +20,10 @@ from pathlib import Path
 from typing import Iterable
 
 warnings.filterwarnings("ignore", message="'cgi' is deprecated.*", category=DeprecationWarning)
-import cgi
+try:
+    import cgi
+except ModuleNotFoundError:
+    import form_compat as cgi
 
 import numpy as np
 from PIL import Image, ImageFilter, ImageOps
