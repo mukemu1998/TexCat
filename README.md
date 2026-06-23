@@ -6,9 +6,27 @@
   <img src="assets/TexCat.png" alt="TexCat logo">
 </p>
 
-## 安装和启动
+## 界面预览
 
-TexCat 当前以源码方式运行，建议使用 Python 3.10 或更新版本。
+这些截图来自 TexCat 暗色主题，用于快速了解主要模块的界面布局。
+
+<p align="center">
+  <img src="docs/images/ui-overview.png" alt="TexCat 主界面" width="780">
+</p>
+
+| 基础处理 | 材质辅助 | 通道与命名 |
+| --- | --- | --- |
+| <img src="docs/images/resize.png" alt="图像大小模块" width="260"><br>图像大小 | <img src="docs/images/normal-grayscale.png" alt="法线和黑白图调整模块" width="260"><br>法线/黑白图调整 | <img src="docs/images/channel-split.png" alt="通道拆分模块" width="260"><br>通道拆分 |
+| <img src="docs/images/compress.png" alt="高质量压缩模块" width="260"><br>高质量压缩 | <img src="docs/images/pbr-helper.png" alt="PBR辅助转换模块" width="260"><br>PBR辅助转换 | <img src="docs/images/channel-merge.png" alt="通道合并模块" width="260"><br>通道合并 |
+| <img src="docs/images/crop.png" alt="图片裁切模块" width="260"><br>图片裁切 |  | <img src="docs/images/rename.png" alt="批量重命名模块" width="260"><br>批量重命名 |
+
+## 下载和启动
+
+普通用户建议在 GitHub Releases 下载 `TexCat_版本号_portable.zip` 便携包。解压后直接双击 `TexCat.exe` 即可启动，不需要单独安装 Python。
+
+`便携版使用说明.md` 是给便携包准备的日常使用说明；仓库里的 `README.md` 同时承担开源项目首页、源码运行和开发说明。
+
+源码运行适合需要查看代码、二次开发或自行打包的用户，建议使用 Python 3.10 或更新版本。
 
 ```powershell
 git clone https://github.com/mukemu1998/TexCat.git
@@ -16,7 +34,7 @@ cd TexCat
 py -3 -m pip install -r requirements.txt
 ```
 
-Windows 下可以直接双击：
+Windows 下源码方式也可以直接双击：
 
 ```text
 启动TexCat.bat
@@ -41,6 +59,11 @@ py -3 src/texture_toolbox.py --web
 ```
 
 脚本会读取 `VERSION`，要求 Git 工作区保持干净，然后从当前提交生成 `dist/TexCat_版本号_source.zip` 和对应的 `.sha256` 校验文件。这个包只包含仓库内已提交的源码、文档、图标和启动脚本，不包含 `.git`、缓存、临时上传目录或打包输出目录。
+
+文档定位建议：
+
+- `README.md`：用于 GitHub 项目首页、源码安装、开发说明和完整功能说明。
+- `便携版使用说明.md`：用于打包版用户阅读，重点说明解压、双击启动、导入导出和常见注意事项。
 
 ## 输入和输出
 
