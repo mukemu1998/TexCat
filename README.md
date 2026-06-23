@@ -6,9 +6,27 @@
   <img src="assets/TexCat.png" alt="TexCat logo">
 </p>
 
-## 安装和启动
+## 界面预览
 
-TexCat 当前以源码方式运行，建议使用 Python 3.10 或更新版本。
+这些截图来自 TexCat 暗色主题，用于快速了解主要模块的界面布局。
+
+<p align="center">
+  <img src="docs/images/ui-overview.png" alt="TexCat 主界面" width="780">
+</p>
+
+| 基础处理 | 材质辅助 | 通道与命名 |
+| --- | --- | --- |
+| <img src="docs/images/resize.png" alt="图像大小模块" width="260"><br>图像大小 | <img src="docs/images/normal-grayscale.png" alt="法线和黑白图调整模块" width="260"><br>法线/黑白图调整 | <img src="docs/images/channel-split.png" alt="通道拆分模块" width="260"><br>通道拆分 |
+| <img src="docs/images/compress.png" alt="高质量压缩模块" width="260"><br>高质量压缩 | <img src="docs/images/pbr-helper.png" alt="PBR辅助转换模块" width="260"><br>PBR辅助转换 | <img src="docs/images/channel-merge.png" alt="通道合并模块" width="260"><br>通道合并 |
+| <img src="docs/images/crop.png" alt="图片裁切模块" width="260"><br>图片裁切 |  | <img src="docs/images/rename.png" alt="批量重命名模块" width="260"><br>批量重命名 |
+
+## 下载和启动
+
+普通用户建议在 GitHub Releases 下载 `TexCat_版本号_portable.zip` 便携包。解压后直接双击 `TexCat.exe` 即可启动，不需要单独安装 Python。
+
+`便携版使用说明.md` 是给便携包准备的日常使用说明；仓库里的 `README.md` 同时承担开源项目首页、源码运行和开发说明。
+
+源码运行适合需要查看代码、二次开发或自行打包的用户，建议使用 Python 3.10 或更新版本。
 
 ```powershell
 git clone https://github.com/mukemu1998/TexCat.git
@@ -16,7 +34,7 @@ cd TexCat
 py -3 -m pip install -r requirements.txt
 ```
 
-Windows 下可以直接双击：
+Windows 下源码方式也可以直接双击：
 
 ```text
 启动TexCat.bat
@@ -32,7 +50,7 @@ py -3 src/texture_toolbox.py --web
 
 当前开发分支增加了 `快速工具模式 / 工作流模式 Beta` 切换。工作流模式 Beta 目前支持资源池同步、步骤结构编辑、缩放/格式压缩/命名规则的参数面板、保存/载入工作流 JSON，以及输出文件名、路径和同名冲突预览，但还不执行完整流水线处理；实际生产仍使用快速工具模式。
 
-顶部标题右侧的信息条会在联网可用时显示当前年月日、星期、12 小时制时间、节日/法定节假日和当地天气；时间会按凌晨、早上、上午、中午、下午、傍晚、晚上、深夜细分显示。没有节日时不显示节日项，节日、温度和位置按同一纵向位置排版，位置使用简易尖角图钉图标。如果网络不可用或接口无法访问，该信息条会自动隐藏。左侧栏包含备忘录和日志，备忘录内容保存在当前浏览器本地，默认显示 20 行内容，超过 20 行后在内容框内滚动；可用 `清空备忘录` 一键清空。
+顶部标题右侧的信息条会显示当前年月日、星期和 12 小时制时间；时间会按凌晨、早上、上午、中午、下午、傍晚、晚上、深夜细分显示。联网可用时会继续补充节日/法定节假日和当地天气；没有节日时不显示节日项，节日、温度和位置按同一纵向位置排版，位置使用简易尖角图钉图标。如果网络不可用或接口无法访问，天气和位置详情会自动隐藏，时间仍继续显示。左侧栏包含备忘录和日志，备忘录内容保存在当前浏览器本地，默认显示 20 行内容，超过 20 行后在内容框内滚动；可用 `清空备忘录` 一键清空。
 
 ## 发布打包
 
@@ -43,6 +61,11 @@ py -3 src/texture_toolbox.py --web
 ```
 
 脚本会读取 `VERSION`，要求 Git 工作区保持干净，然后从当前提交生成 `dist/TexCat_版本号_source.zip` 和对应的 `.sha256` 校验文件。这个包只包含仓库内已提交的源码、文档、图标和启动脚本，不包含 `.git`、缓存、临时上传目录或打包输出目录。
+
+文档定位建议：
+
+- `README.md`：用于 GitHub 项目首页、源码安装、开发说明和完整功能说明。
+- `便携版使用说明.md`：用于打包版用户阅读，重点说明解压、双击启动、导入导出和常见注意事项。
 
 ## 输入和输出
 
