@@ -1053,16 +1053,77 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   position: relative;
   width: min(94vw, 1400px);
   height: min(88vh, 980px);
-  display: grid;
-  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.16);
+  background-color: #15181d;
+  background-image:
+    linear-gradient(45deg, rgba(255,255,255,.06) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,.06) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255,255,255,.06) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.06) 75%);
+  background-size: 32px 32px;
+  background-position: 0 0, 0 16px, 16px -16px, -16px 0;
+  cursor: crosshair;
   user-select: none;
+  touch-action: none;
 }
 .crop-editor img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: none;
+  max-height: none;
+  object-fit: fill;
   border-radius: 0;
   touch-action: none;
+  transform-origin: 0 0;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+.crop-editor.pan-mode,
+.crop-editor.space-pan {
+  cursor: grab;
+}
+.crop-editor.panning {
+  cursor: grabbing;
+}
+.crop-view-controls {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  z-index: 6;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: var(--radius-limited);
+  background: rgba(0,0,0,.62);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(0,0,0,.28);
+}
+.crop-view-controls button {
+  min-width: 38px;
+  height: 32px;
+  padding: 0 10px;
+  border-color: rgba(255,255,255,.28);
+  background: rgba(255,255,255,.12);
+  color: #fff;
+}
+.crop-view-controls button:hover,
+.crop-view-controls button.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
+}
+.crop-view-status {
+  min-width: 52px;
+  color: #fff;
+  text-align: center;
+  font-size: 12px;
 }
 .crop-hint {
   position: absolute;
@@ -1086,6 +1147,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   border: 2px solid var(--primary);
   background: color-mix(in srgb, var(--primary) 22%, transparent);
   display: none;
+  z-index: 2;
   pointer-events: auto;
   box-sizing: border-box;
   touch-action: none;
@@ -1100,7 +1162,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   gap: 10px;
   width: min(720px, calc(100vw - 48px));
   transform: translateX(-50%);
-  z-index: 3;
+  z-index: 5;
 }
 .crop-action-options {
   display: flex;
@@ -1983,6 +2045,14 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 </div>
 <div id="crop-overlay" class="crop-overlay" aria-label="裁切编辑模式">
   <div id="crop-editor" class="crop-editor">
+    <div class="crop-view-controls" aria-label="裁切视图控制">
+      <button id="crop-view-fit" type="button" title="适配全图">适配</button>
+      <button id="crop-view-out" type="button" title="缩小">-</button>
+      <button id="crop-view-in" type="button" title="放大">+</button>
+      <button id="crop-view-actual" type="button" title="按原图像素查看">1:1</button>
+      <button id="crop-view-pan" type="button" title="移动视图" aria-pressed="false">移动</button>
+      <span id="crop-view-status" class="crop-view-status">100%</span>
+    </div>
     <img id="crop-editor-img" alt="裁切编辑图">
     <div id="crop-hint" class="crop-hint">拖拽图片区域，自由框选裁切范围</div>
     <div id="crop-box" class="crop-box"></div>
@@ -2147,6 +2217,12 @@ const cropCards = document.getElementById("crop-cards");
 const cropOverlay = document.getElementById("crop-overlay");
 const cropEditor = document.getElementById("crop-editor");
 const cropEditorImg = document.getElementById("crop-editor-img");
+const cropViewFit = document.getElementById("crop-view-fit");
+const cropViewOut = document.getElementById("crop-view-out");
+const cropViewIn = document.getElementById("crop-view-in");
+const cropViewActual = document.getElementById("crop-view-actual");
+const cropViewPan = document.getElementById("crop-view-pan");
+const cropViewStatus = document.getElementById("crop-view-status");
 const cropHint = document.getElementById("crop-hint");
 const cropBox = document.getElementById("crop-box");
 const cropActions = document.getElementById("crop-actions");
@@ -2190,6 +2266,10 @@ let cropDraft = null;
 let cropDragStart = null;
 let cropResizeState = null;
 let cropPreviewMeta = null;
+let cropView = { x: 0, y: 0, scale: 1, fitScale: 1, panMode: false };
+let cropPanState = null;
+let cropSpacePan = false;
+let cropLastPointerTime = 0;
 let workflowSteps = [];
 let workflowSelectedStepId = null;
 let workflowStepSerial = 1;
@@ -3796,8 +3876,129 @@ function renderCropCards() {
     cropCards.appendChild(card);
   });
 }
+function cropEditorRect() {
+  return cropEditor.getBoundingClientRect();
+}
 function cropImageRect() {
   return cropEditorImg.getBoundingClientRect();
+}
+function cropFitScale() {
+  const editorRect = cropEditorRect();
+  const natural = cropNaturalSize();
+  const scale = Math.min(editorRect.width / natural.width, editorRect.height / natural.height, 1);
+  return Math.max(0.01, Number.isFinite(scale) ? scale : 1);
+}
+function cropScaledSize(scale = cropView.scale) {
+  const natural = cropNaturalSize();
+  return {
+    width: natural.width * scale,
+    height: natural.height * scale,
+  };
+}
+function cropClampedOffset(offset, viewportSize, contentSize) {
+  const margin = 90;
+  if (contentSize <= viewportSize) return (viewportSize - contentSize) / 2;
+  return clampNumber(offset, viewportSize - contentSize - margin, margin);
+}
+function clampCropView() {
+  const editorRect = cropEditorRect();
+  const size = cropScaledSize();
+  cropView.x = cropClampedOffset(cropView.x, editorRect.width, size.width);
+  cropView.y = cropClampedOffset(cropView.y, editorRect.height, size.height);
+}
+function updateCropViewControls() {
+  cropEditor.classList.toggle("pan-mode", cropView.panMode);
+  cropEditor.classList.toggle("space-pan", cropSpacePan);
+  cropViewPan.classList.toggle("active", cropView.panMode);
+  cropViewPan.setAttribute("aria-pressed", cropView.panMode ? "true" : "false");
+  cropViewStatus.textContent = `${Math.round(cropView.scale * 100)}%`;
+  if (cropOverlay.classList.contains("open")) updateCropActionControls();
+}
+function applyCropView(renderDraft = true) {
+  const size = cropScaledSize();
+  cropEditorImg.style.width = `${Math.max(1, size.width)}px`;
+  cropEditorImg.style.height = `${Math.max(1, size.height)}px`;
+  cropEditorImg.style.transform = `translate(${cropView.x}px, ${cropView.y}px)`;
+  updateCropViewControls();
+  if (renderDraft) renderCropDraftBox();
+}
+function fitCropView() {
+  const editorRect = cropEditorRect();
+  cropView.fitScale = cropFitScale();
+  cropView.scale = cropView.fitScale;
+  const size = cropScaledSize();
+  cropView.x = (editorRect.width - size.width) / 2;
+  cropView.y = (editorRect.height - size.height) / 2;
+  applyCropView();
+}
+function setCropViewScale(scale, clientX, clientY) {
+  const editorRect = cropEditorRect();
+  const oldScale = cropView.scale || cropView.fitScale || 1;
+  const minScale = cropView.fitScale || cropFitScale();
+  const maxScale = Math.max(8, minScale);
+  const nextScale = clampNumber(scale, minScale, maxScale);
+  const anchorX = Number.isFinite(clientX) ? clientX - editorRect.left : editorRect.width / 2;
+  const anchorY = Number.isFinite(clientY) ? clientY - editorRect.top : editorRect.height / 2;
+  const imageX = (anchorX - cropView.x) / oldScale;
+  const imageY = (anchorY - cropView.y) / oldScale;
+  cropView.scale = nextScale;
+  cropView.x = anchorX - imageX * nextScale;
+  cropView.y = anchorY - imageY * nextScale;
+  clampCropView();
+  applyCropView();
+}
+function setCropViewScaleFromCenter(scale) {
+  const editorRect = cropEditorRect();
+  setCropViewScale(scale, editorRect.left + editorRect.width / 2, editorRect.top + editorRect.height / 2);
+}
+function captureCropInput(event) {
+  if (typeof event.pointerId === "number" && cropEditor.setPointerCapture) {
+    cropEditor.setPointerCapture(event.pointerId);
+  }
+}
+function releaseCropInput(event) {
+  if (typeof event.pointerId === "number" && cropEditor.hasPointerCapture && cropEditor.hasPointerCapture(event.pointerId)) {
+    cropEditor.releasePointerCapture(event.pointerId);
+  }
+}
+function startCropPan(event) {
+  event.preventDefault();
+  captureCropInput(event);
+  cropPanState = {
+    x: cropView.x,
+    y: cropView.y,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  };
+  cropDragStart = null;
+  cropResizeState = null;
+  cropEditor.classList.add("panning");
+}
+function updateCropPan(event) {
+  if (!cropPanState) return;
+  cropView.x = cropPanState.x + event.clientX - cropPanState.clientX;
+  cropView.y = cropPanState.y + event.clientY - cropPanState.clientY;
+  clampCropView();
+  applyCropView();
+}
+function finishCropPan() {
+  cropPanState = null;
+  cropEditor.classList.remove("panning");
+}
+function cropPanRequested(event) {
+  return cropView.panMode || cropSpacePan || event.button === 1 || event.buttons === 4;
+}
+function updateCropDragFromEvent(event) {
+  if (cropPanState) {
+    updateCropPan(event);
+    return;
+  }
+  const point = editorPoint(event);
+  if (cropResizeState) {
+    updateCropBoxFromResize(point);
+  } else if (cropDragStart) {
+    updateCropBoxFromPoints(cropDragStart, point);
+  }
 }
 function editorPoint(event) {
   const rect = cropImageRect();
@@ -3855,7 +4056,7 @@ function setCustomCropAtPoint(point) {
 function updateCropActionControls() {
   const mode = cropShapeMode();
   cropCustomPixels.style.display = mode === "custom" ? "inline-flex" : "none";
-  cropHint.style.display = cropDraft ? "none" : "block";
+  cropHint.style.display = cropDraft || cropView.panMode || cropSpacePan ? "none" : "block";
 }
 function applyCropShapeModeToDraft() {
   updateCropActionControls();
@@ -3895,8 +4096,14 @@ function renderCropDraftBox(rect = cropImageRect()) {
   cropBox.style.top = `${rect.top - editorRect.top + y}px`;
   cropBox.style.width = `${w}px`;
   cropBox.style.height = `${h}px`;
-  cropActions.style.left = `${rect.left - editorRect.left + x + w / 2}px`;
-  cropActions.style.top = `${rect.top - editorRect.top + y + h + 10}px`;
+  const actionX = clampNumber(rect.left - editorRect.left + x + w / 2, 160, Math.max(160, editorRect.width - 160));
+  const belowY = rect.top - editorRect.top + y + h + 10;
+  const aboveY = rect.top - editorRect.top + y - 72;
+  const actionY = belowY > editorRect.height - 86 && aboveY > 8
+    ? aboveY
+    : clampNumber(belowY, 8, Math.max(8, editorRect.height - 86));
+  cropActions.style.left = `${actionX}px`;
+  cropActions.style.top = `${actionY}px`;
   cropActions.style.display = w > 8 && h > 8 ? "flex" : "none";
 }
 function updateCropBoxFromPoints(start, point) {
@@ -4071,6 +4278,10 @@ function closeCropEditor() {
   cropHint.style.display = "none";
   cropDragStart = null;
   cropResizeState = null;
+  finishCropPan();
+  cropSpacePan = false;
+  cropView.panMode = false;
+  updateCropViewControls();
   cropDraft = null;
 }
 async function openCropEditor() {
@@ -4084,8 +4295,13 @@ async function openCropEditor() {
   cropActions.style.display = "none";
   cropHint.style.display = "block";
   cropResizeState = null;
+  cropDragStart = null;
+  finishCropPan();
+  cropSpacePan = false;
+  cropView.panMode = false;
   cropDraft = null;
   updateCropActionControls();
+  requestAnimationFrame(fitCropView);
 }
 function confirmCropDraft() {
   if (!cropDraft || cropDraft.w <= 0.002 || cropDraft.h <= 0.002) return;
@@ -4352,18 +4568,35 @@ cropCustomHeight.oninput = applyCropShapeModeToDraft;
 cropAnchorGrid.querySelectorAll("button[data-anchor]").forEach(button => {
   button.onclick = () => alignCropDraft(button.dataset.anchor || "mc");
 });
+cropViewFit.onclick = fitCropView;
+cropViewOut.onclick = () => setCropViewScaleFromCenter(cropView.scale / 1.18);
+cropViewIn.onclick = () => setCropViewScaleFromCenter(cropView.scale * 1.18);
+cropViewActual.onclick = () => setCropViewScaleFromCenter(1);
+cropViewPan.onclick = () => {
+  cropView.panMode = !cropView.panMode;
+  updateCropViewControls();
+};
+cropEditorImg.addEventListener("load", () => {
+  if (cropOverlay.classList.contains("open")) fitCropView();
+});
 cropEditor.addEventListener("pointerdown", event => {
+  cropLastPointerTime = Date.now();
+  if (event.target.closest(".crop-view-controls") || event.target.closest(".crop-actions")) return;
+  if (cropPanRequested(event)) {
+    startCropPan(event);
+    return;
+  }
   if (event.target === cropBox && cropDraft) {
     const edge = cropEdgeFromEvent(event) || "move";
     event.preventDefault();
-    cropEditor.setPointerCapture(event.pointerId);
+    captureCropInput(event);
     cropResizeState = { edge, draft: { ...cropDraft }, point: editorPoint(event) };
     cropBox.style.cursor = cropEdgeCursor(edge);
     return;
   }
   if (event.target !== cropEditorImg && event.target !== cropEditor) return;
   event.preventDefault();
-  cropEditor.setPointerCapture(event.pointerId);
+  captureCropInput(event);
   cropDragStart = editorPoint(event);
   cropResizeState = null;
   cropDraft = null;
@@ -4375,18 +4608,59 @@ cropEditor.addEventListener("pointermove", event => {
     cropBox.style.cursor = cropEdgeCursor(cropEdgeFromEvent(event));
   }
   if (!cropEditor.hasPointerCapture(event.pointerId)) return;
-  const point = editorPoint(event);
-  if (cropResizeState) {
-    updateCropBoxFromResize(point);
-  } else if (cropDragStart) {
-    updateCropBoxFromPoints(cropDragStart, point);
-  }
+  updateCropDragFromEvent(event);
 });
 cropEditor.addEventListener("pointerup", event => {
-  if (cropEditor.hasPointerCapture(event.pointerId)) cropEditor.releasePointerCapture(event.pointerId);
+  releaseCropInput(event);
+  finishCropPan();
   cropDragStart = null;
   cropResizeState = null;
 });
+cropEditor.addEventListener("pointercancel", event => {
+  releaseCropInput(event);
+  finishCropPan();
+  cropDragStart = null;
+  cropResizeState = null;
+});
+cropEditor.addEventListener("mousedown", event => {
+  if (Date.now() - cropLastPointerTime < 600) return;
+  if (event.target.closest(".crop-view-controls") || event.target.closest(".crop-actions")) return;
+  if (cropPanRequested(event)) {
+    startCropPan(event);
+    return;
+  }
+  if (event.target === cropBox && cropDraft) {
+    const edge = cropEdgeFromEvent(event) || "move";
+    event.preventDefault();
+    cropResizeState = { edge, draft: { ...cropDraft }, point: editorPoint(event) };
+    cropBox.style.cursor = cropEdgeCursor(edge);
+    return;
+  }
+  if (event.target !== cropEditorImg && event.target !== cropEditor) return;
+  event.preventDefault();
+  cropDragStart = editorPoint(event);
+  cropResizeState = null;
+  cropDraft = null;
+  cropActions.style.display = "none";
+  updateCropBoxFromPoints(cropDragStart, cropDragStart);
+});
+document.addEventListener("mousemove", event => {
+  if (!cropOverlay.classList.contains("open")) return;
+  if (!cropPanState && !cropResizeState && !cropDragStart) return;
+  event.preventDefault();
+  updateCropDragFromEvent(event);
+});
+document.addEventListener("mouseup", () => {
+  finishCropPan();
+  cropDragStart = null;
+  cropResizeState = null;
+});
+cropEditor.addEventListener("wheel", event => {
+  if (event.target.closest(".crop-view-controls") || event.target.closest(".crop-actions")) return;
+  event.preventDefault();
+  const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+  setCropViewScale(cropView.scale * factor, event.clientX, event.clientY);
+}, { passive: false });
 cropConfirm.onclick = confirmCropDraft;
 cropCancel.onclick = closeCropEditor;
 cropZoom.onclick = () => {
@@ -4394,8 +4668,27 @@ cropZoom.onclick = () => {
   cropZoomImg.src = "";
 };
 document.addEventListener("keydown", event => {
+  const tag = event.target && event.target.tagName;
+  const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(tag);
+  if (cropOverlay.classList.contains("open") && event.code === "Space" && !typing) {
+    cropSpacePan = true;
+    updateCropViewControls();
+    event.preventDefault();
+  }
   if (event.key === "Escape" && cropOverlay.classList.contains("open")) closeCropEditor();
   if (event.key === "Escape" && cropZoom.classList.contains("open")) cropZoom.click();
+});
+document.addEventListener("keyup", event => {
+  if (event.code === "Space") {
+    cropSpacePan = false;
+    updateCropViewControls();
+  }
+});
+window.addEventListener("resize", () => {
+  if (!cropOverlay.classList.contains("open")) return;
+  cropView.fitScale = cropFitScale();
+  clampCropView();
+  applyCropView();
 });
 previewRun.onclick = previewSelectedChannels;
 strengthKind.onchange = updateStrengthMode;
