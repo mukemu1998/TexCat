@@ -2146,6 +2146,7 @@ const weatherIcon = document.getElementById("weather-icon");
 const weatherText = document.getElementById("weather-text");
 const locationIcon = document.getElementById("location-icon");
 const weatherLocation = document.getElementById("weather-location");
+const dailyDetails = dailyWidget ? dailyWidget.querySelector(".daily-details") : null;
 const inputDir = document.getElementById("input-dir");
 const refreshInput = document.getElementById("refresh-input");
 const outputBox = document.getElementById("output");
@@ -2451,13 +2452,15 @@ async function loadHolidayText(date, countryCode) {
 }
 
 async function initDailyWidget() {
+  updateClock();
+  setInterval(updateClock, 1000);
+  dailyWidget.hidden = false;
+  holidayLine.hidden = true;
+  if (dailyDetails) dailyDetails.hidden = true;
   if (!navigator.onLine) {
-    dailyWidget.hidden = true;
     return;
   }
   try {
-    updateClock();
-    setInterval(updateClock, 1000);
     const location = await fetchJsonWithTimeout("https://ipapi.co/json/", 5000);
     const latitude = Number(location.latitude);
     const longitude = Number(location.longitude);
@@ -2481,9 +2484,11 @@ async function initDailyWidget() {
     weatherText.textContent = `${temp}${humidity ? ` / ${humidity}` : ""}`;
     locationIcon.title = "位置";
     weatherLocation.textContent = [location.city, location.region, location.country_name].filter(Boolean).join(" / ");
+    if (dailyDetails) dailyDetails.hidden = false;
     dailyWidget.hidden = false;
   } catch (_) {
-    dailyWidget.hidden = true;
+    holidayLine.hidden = true;
+    if (dailyDetails) dailyDetails.hidden = true;
   }
 }
 
