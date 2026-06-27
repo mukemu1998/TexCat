@@ -23,6 +23,11 @@ build/
 dist/
 *.spec
 
+# Local planning notes
+ROADMAP.md
+WORKFLOW_DESIGN.md
+local-notes/
+
 # Windows/editor clutter
 Thumbs.db
 Desktop.ini
