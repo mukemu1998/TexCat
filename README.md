@@ -1,10 +1,41 @@
-# TexCat / TexCat贴图工具箱
-
-一个面向游戏贴图项目的本地浏览器工具箱。默认入口是网页拖拽界面，支持把图片或文件夹拖入页面后批量处理。
+# TexCat
 
 <p align="center">
-  <img src="assets/TexCat.png" alt="TexCat logo">
+  <img src="assets/TexCat.png" alt="TexCat logo" width="112">
 </p>
+
+<p align="center"><strong>面向游戏贴图生产流程的本地浏览器工具箱</strong></p>
+
+<p align="center">
+  <a href="https://github.com/mukemu1998/TexCat/releases"><img src="https://img.shields.io/github/v/release/mukemu1998/TexCat?display_name=tag&label=Release" alt="Release"></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0f6cbd" alt="Platform">
+  <img src="https://img.shields.io/badge/Mode-Portable%20or%20Source-1f7a5c" alt="Mode">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-f2b134" alt="License"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/mukemu1998/TexCat/releases">下载便携版</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#界面预览">界面预览</a> ·
+  <a href="#当前模块">模块清单</a>
+</p>
+
+TexCat 聚合了游戏贴图生产中常见的本地处理流程：图像缩放、格式互转、高质量压缩、裁切、法线与黑白图调整、PBR 辅助、通道拆分与合并，以及批量重命名。默认入口是浏览器界面，支持直接拖入图片或文件夹后批量处理。
+
+## 核心能力
+
+| 本地处理 | 贴图流程导向 | 批量入口 | 使用方式 |
+| --- | --- | --- | --- |
+| 图片处理在本机完成，核心功能不依赖云端服务。 | 围绕通道、位深、法线方向、PBR 辅助和命名规则设计。 | 支持拖拽、批量选择和自定义输入目录。 | 便携版开箱即用，源码版适合二次开发和自定义打包。 |
+
+## 快速开始
+
+| 方式 | 适合谁 | 如何开始 |
+| --- | --- | --- |
+| `便携版` | 想直接使用工具箱的用户 | 在 [Releases](https://github.com/mukemu1998/TexCat/releases) 下载 `TexCat_版本号_portable.zip`，解压后双击 `TexCat.exe`。 |
+| `源码版` | 需要查看代码、调试或二次开发的用户 | 克隆仓库后执行 `py -3 -m pip install -r requirements.txt`，再运行 `启动TexCat.bat` 或 `py -3 src/texture_toolbox.py --web`。 |
+
+便携版根目录只有一份 `README.md`，内容是面向普通用户的开箱即用说明；仓库里的 `README.md` 继续承担项目首页、源码运行和完整功能说明。
 
 ## 界面预览
 
@@ -20,7 +51,7 @@
 | <img src="docs/images/compress.png" alt="高质量压缩模块" width="260"><br>高质量压缩 | <img src="docs/images/pbr-helper.png" alt="PBR辅助转换模块" width="260"><br>PBR辅助转换 | <img src="docs/images/channel-merge.png" alt="通道合并模块" width="260"><br>通道合并 |
 | <img src="docs/images/crop.png" alt="图片裁切模块" width="260"><br>图片裁切 |  | <img src="docs/images/rename.png" alt="批量重命名模块" width="260"><br>批量重命名 |
 
-## 下载和启动
+## 源码运行与详细启动说明
 
 普通用户建议在 GitHub Releases 下载 `TexCat_版本号_portable.zip` 便携包。解压后直接双击 `TexCat.exe` 即可启动，不需要单独安装 Python。
 
