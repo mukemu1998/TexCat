@@ -1964,7 +1964,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <button id="workflow-load" class="secondary" type="button">载入工作流 JSON</button>
           <input id="workflow-load-input" type="file" accept=".json,application/json" hidden>
         </div>
-        <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：图片裁切 / 法线与黑白调整 / 通道拆分 / 缩放 / 格式与压缩 / 命名规则；其余步骤先保留结构和预览。</div>
+        <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：图片裁切 / 法线与黑白调整 / 通道拆分 / 通道合并 / 缩放 / 格式与压缩 / 命名规则；PBR 仍先保留在快速工具模式。</div>
       </div>
       <div class="workflow-column">
         <div class="workflow-column-title">参数与输出摘要</div>
@@ -2596,7 +2596,7 @@ const workflowStepDefinitions = {
   merge: {
     label: "通道合并/打包",
     summary: "将多张图或指定通道打包为 RGB/RGBA。",
-    detail: "参数占位：基础图、目标 R/G/B/A 来源、默认黑白通道、合成图命名。"
+    detail: "可读取当前通道合并模块设置，或直接从进入此步骤的上游结果中选择基础图与 R/G/B/A 来源。"
   },
   rename: {
     label: "命名规则",
@@ -2745,6 +2745,59 @@ function currentSplitWorkflowOptions() {
     },
   });
 }
+function workflowDefaultMergeSpecs() {
+  return {
+    r: { mode: "default0", file: "", channel: "gray" },
+    g: { mode: "default0", file: "", channel: "gray" },
+    b: { mode: "default0", file: "", channel: "gray" },
+    a: { mode: "default255", file: "", channel: "gray" },
+  };
+}
+function workflowNormalizeMergeSpecs(value) {
+  const defaults = workflowDefaultMergeSpecs();
+  const source = value && typeof value === "object" ? value : {};
+  const specs = {};
+  for (const key of ["r", "g", "b", "a"]) {
+    const raw = source[key] && typeof source[key] === "object" ? source[key] : {};
+    const fallback = defaults[key];
+    const mode = ["default0", "default255", "base", "file"].includes(raw.mode) ? raw.mode : fallback.mode;
+    specs[key] = {
+      mode,
+      file: raw.file === undefined || raw.file === null ? "" : String(raw.file),
+      channel: ["gray", "r", "g", "b", "a"].includes(raw.channel) ? raw.channel : fallback.channel,
+    };
+  }
+  return specs;
+}
+function currentMergeWorkflowOptions() {
+  return workflowMergeOptions("merge", {
+    base: document.getElementById("merge-base").value,
+    output_name: document.getElementById("merge-name").value.trim(),
+    format: document.getElementById("merge-format").value || "png",
+    specs: {
+      r: {
+        mode: document.getElementById("merge-r-mode").value,
+        file: document.getElementById("merge-r-file").value,
+        channel: document.getElementById("merge-r-channel").value,
+      },
+      g: {
+        mode: document.getElementById("merge-g-mode").value,
+        file: document.getElementById("merge-g-file").value,
+        channel: document.getElementById("merge-g-channel").value,
+      },
+      b: {
+        mode: document.getElementById("merge-b-mode").value,
+        file: document.getElementById("merge-b-file").value,
+        channel: document.getElementById("merge-b-channel").value,
+      },
+      a: {
+        mode: document.getElementById("merge-a-mode").value,
+        file: document.getElementById("merge-a-file").value,
+        channel: document.getElementById("merge-a-channel").value,
+      },
+    },
+  });
+}
 function workflowDefaultOptions(type) {
   if (type === "resize") {
     return { sizes: [], custom: "", profile: "detail", format: "keep", preserve: true, append_size_suffix: true };
@@ -2772,6 +2825,9 @@ function workflowDefaultOptions(type) {
   }
   if (type === "split") {
     return { format: "png", channels: workflowDefaultSplitChannels() };
+  }
+  if (type === "merge") {
+    return { base: "", output_name: "merged_rgba", format: "png", specs: workflowDefaultMergeSpecs() };
   }
   if (type === "rename") {
     return { format: "keep", steps: [workflowDefaultRenameStep()] };
@@ -2811,6 +2867,11 @@ function workflowMergeOptions(type, options) {
   } else if (type === "split") {
     merged.format = merged.format === "keep" || workflowFormatValues.includes(merged.format) ? merged.format : "png";
     merged.channels = workflowNormalizeSplitChannels(merged.channels);
+  } else if (type === "merge") {
+    merged.base = merged.base === undefined || merged.base === null ? "" : String(merged.base);
+    merged.output_name = String(merged.output_name || "merged_rgba").trim() || "merged_rgba";
+    merged.format = workflowFormatValues.includes(merged.format) ? merged.format : "png";
+    merged.specs = workflowNormalizeMergeSpecs(merged.specs);
   } else if (type === "export") {
     merged.format = workflowFormatValues.includes(merged.format) ? merged.format : "png";
     merged.quality = Math.max(80, Math.min(100, Math.round(Number(merged.quality) || 95)));
@@ -2850,6 +2911,7 @@ function workflowInitialOptions(type) {
     if (type === "crop") return currentCropWorkflowOptions();
     if (type === "normal") return currentNormalWorkflowOptions();
     if (type === "split") return currentSplitWorkflowOptions();
+    if (type === "merge") return currentMergeWorkflowOptions();
     if (type === "export") return currentExportWorkflowOptions();
     if (type === "rename") return currentRenameWorkflowOptions();
   } catch (_error) {
@@ -2913,6 +2975,15 @@ function workflowStepSummary(step) {
     const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
     const enabled = Object.entries(options.channels || {}).filter(([, spec]) => spec && spec.enabled).map(([key]) => key.toUpperCase()).join(" / ") || "未启用";
     return `${enabled}，${formatText}`;
+  }
+  if (step.type === "merge") {
+    const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
+    const selected = Object.entries(options.specs || {})
+      .filter(([, spec]) => spec && (spec.mode === "file" || spec.mode === "base"))
+      .map(([key, spec]) => `${key.toUpperCase()}:${spec.mode === "base" ? "基础图" : "来源文件"}`)
+      .join(" / ") || "未指定通道来源";
+    const baseText = options.base !== "" ? "带基础图" : "无基础图";
+    return `${baseText}，${selected}，${options.output_name}.${options.format}，${formatText}`;
   }
   if (step.type === "export") {
     const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
@@ -3051,6 +3122,11 @@ function updateWorkflowSummary() {
       const options = workflowMergeOptions("split", step.options);
       const multiplier = Object.values(options.channels || {}).filter(spec => spec && spec.enabled).length;
       counts = counts.map(count => count * multiplier);
+    } else if (step.type === "merge") {
+      const options = workflowMergeOptions("merge", step.options);
+      const hasSource = options.base !== "" || Object.values(options.specs || {}).some(spec => spec && spec.mode === "file" && spec.file !== "");
+      const total = counts.reduce((sum, count) => sum + count, 0);
+      counts = hasSource && total > 0 ? [1] : [];
     }
   }
   const estimatedOutputs = counts.reduce((sum, count) => sum + count, 0);
@@ -3476,6 +3552,174 @@ function renderWorkflowSplitDetail(step) {
   renderRows();
   workflowDetailBody.appendChild(card);
 }
+function renderWorkflowMergeDetail(step) {
+  step.options = workflowMergeOptions("merge", step.options);
+  const options = step.options;
+  const card = document.createElement("div");
+  card.className = "workflow-param-card";
+  card.innerHTML = `
+    <div class="workflow-param-actions">
+      <button class="secondary" type="button" data-workflow-sync>读取当前通道合并模块设置</button>
+      <button class="secondary" type="button" data-workflow-refresh>刷新上游来源</button>
+      <span class="muted">这里显示进入此步骤时的上游结果；先拆分再合并也会按当前工作流顺序列出来。</span>
+    </div>
+    <div class="workflow-param-grid">
+      <label>基础图
+        <select data-workflow-merge-base>
+          <option value="">正在读取...</option>
+        </select>
+      </label>
+      <label>输出名 <input data-workflow-merge-name type="text" value="${escapeHtml(options.output_name)}"></label>
+      <label>输出格式
+        <select data-workflow-merge-format>${workflowFormatOptionHtml(options.format, false)}</select>
+      </label>
+    </div>
+    <div class="muted" data-workflow-merge-status>正在读取上游来源...</div>
+    <div class="workflow-param-list" data-workflow-merge-list></div>
+  `;
+  const baseSelect = card.querySelector("[data-workflow-merge-base]");
+  const nameInput = card.querySelector("[data-workflow-merge-name]");
+  const formatSelect = card.querySelector("[data-workflow-merge-format]");
+  const status = card.querySelector("[data-workflow-merge-status]");
+  const list = card.querySelector("[data-workflow-merge-list]");
+  let currentSources = [];
+  const modeLabels = {
+    default0: "默认 0 / 黑",
+    default255: "默认 255 / 白",
+    base: "保留基础图通道",
+    file: "使用来源文件通道",
+  };
+  const channelLabels = {
+    gray: "灰度/Luma",
+    r: "R",
+    g: "G",
+    b: "B",
+    a: "A/Alpha",
+  };
+  const sourceSummary = source => {
+    const notes = source.notes ? ` | ${source.notes}` : "";
+    const channels = Array.isArray(source.channels) && source.channels.length ? ` | 通道 ${source.channels.join("/")}` : "";
+    return `${source.source || `来源 ${source.index + 1}`} -> ${source.stem || "未命名"} | ${source.size || "未知尺寸"} | ${source.mode || "未知模式"} / ${source.format || "KEEP"}${channels}${notes}`;
+  };
+  const sourceOptionsHtml = (selected, emptyText) => {
+    const items = [`<option value="">${escapeHtml(emptyText)}</option>`];
+    currentSources.forEach(source => {
+      items.push(`<option value="${source.index}"${String(selected) === String(source.index) ? " selected" : ""}>${escapeHtml(sourceSummary(source))}</option>`);
+    });
+    return items.join("");
+  };
+  const apply = () => {
+    step.options = workflowMergeOptions("merge", {
+      ...step.options,
+      base: baseSelect.value,
+      output_name: nameInput.value,
+      format: formatSelect.value,
+      specs: {
+        r: {
+          mode: list.querySelector('[data-workflow-merge-mode="r"]')?.value || "default0",
+          file: list.querySelector('[data-workflow-merge-file="r"]')?.value || "",
+          channel: list.querySelector('[data-workflow-merge-channel="r"]')?.value || "gray",
+        },
+        g: {
+          mode: list.querySelector('[data-workflow-merge-mode="g"]')?.value || "default0",
+          file: list.querySelector('[data-workflow-merge-file="g"]')?.value || "",
+          channel: list.querySelector('[data-workflow-merge-channel="g"]')?.value || "gray",
+        },
+        b: {
+          mode: list.querySelector('[data-workflow-merge-mode="b"]')?.value || "default0",
+          file: list.querySelector('[data-workflow-merge-file="b"]')?.value || "",
+          channel: list.querySelector('[data-workflow-merge-channel="b"]')?.value || "gray",
+        },
+        a: {
+          mode: list.querySelector('[data-workflow-merge-mode="a"]')?.value || "default255",
+          file: list.querySelector('[data-workflow-merge-file="a"]')?.value || "",
+          channel: list.querySelector('[data-workflow-merge-channel="a"]')?.value || "gray",
+        },
+      },
+    });
+    refreshWorkflowAfterOptionChange(step);
+  };
+  const updateRowState = key => {
+    const modeSelect = list.querySelector(`[data-workflow-merge-mode="${key}"]`);
+    const fileSelect = list.querySelector(`[data-workflow-merge-file="${key}"]`);
+    const channelSelect = list.querySelector(`[data-workflow-merge-channel="${key}"]`);
+    const mode = modeSelect?.value || "";
+    if (fileSelect) fileSelect.disabled = mode !== "file";
+    if (channelSelect) channelSelect.disabled = mode !== "file";
+  };
+  const renderRows = () => {
+    const currentOptions = workflowMergeOptions("merge", step.options);
+    list.innerHTML = "";
+    for (const key of ["r", "g", "b", "a"]) {
+      const spec = currentOptions.specs[key];
+      const row = document.createElement("div");
+      row.className = "workflow-row";
+      row.innerHTML = `
+        <strong>目标 ${key.toUpperCase()}</strong>
+        <span style="display:inline-flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <label>方式
+            <select data-workflow-merge-mode="${key}">${workflowOptionHtml(["default0", "default255", "base", "file"], modeLabels, spec.mode)}</select>
+          </label>
+          <label>来源
+            <select data-workflow-merge-file="${key}">${sourceOptionsHtml(spec.file, "未选择来源")}</select>
+          </label>
+          <label>通道
+            <select data-workflow-merge-channel="${key}">${workflowOptionHtml(["gray", "r", "g", "b", "a"], channelLabels, spec.channel)}</select>
+          </label>
+        </span>
+      `;
+      list.appendChild(row);
+    }
+    list.querySelectorAll("select").forEach(select => {
+      const key = select.dataset.workflowMergeMode || select.dataset.workflowMergeFile || select.dataset.workflowMergeChannel;
+      select.onchange = () => {
+        if (key) updateRowState(key);
+        apply();
+      };
+    });
+    for (const key of ["r", "g", "b", "a"]) updateRowState(key);
+  };
+  const loadSources = async (loadingText = "正在读取上游来源...") => {
+    status.textContent = loadingText;
+    list.innerHTML = "";
+    try {
+      const form = new FormData();
+      appendWorkflowCommon(form);
+      form.append("step_id", step.id);
+      const response = await fetch("/workflow-merge-sources", { method: "POST", body: form });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || "读取失败");
+      currentSources = Array.isArray(result.items) ? result.items : [];
+      const currentOptions = workflowMergeOptions("merge", step.options);
+      baseSelect.innerHTML = sourceOptionsHtml(currentOptions.base, "无基础图");
+      renderRows();
+      if (!currentSources.length) {
+        status.textContent = "当前没有可用于通道合并的上游结果。";
+        return;
+      }
+      const warningText = Array.isArray(result.warnings) && result.warnings.length ? `；${result.warnings.join("；")}` : "";
+      status.textContent = `已读取 ${currentSources.length} 项上游结果。${warningText}`;
+    } catch (error) {
+      currentSources = [];
+      baseSelect.innerHTML = `<option value="">无基础图</option>`;
+      list.innerHTML = "";
+      status.textContent = `读取失败：${error.message}`;
+    }
+  };
+  nameInput.oninput = apply;
+  formatSelect.onchange = apply;
+  baseSelect.onchange = apply;
+  card.querySelector("[data-workflow-sync]").onclick = () => {
+    step.options = currentMergeWorkflowOptions();
+    workflowStatus("已读取当前通道合并模块设置。");
+    renderWorkflowShell();
+  };
+  card.querySelector("[data-workflow-refresh]").onclick = () => {
+    loadSources("正在刷新上游来源...");
+  };
+  workflowDetailBody.appendChild(card);
+  loadSources();
+}
 function workflowRenameOpLabel(op) {
   return {
     replace: "查找替换",
@@ -3571,6 +3815,8 @@ function renderWorkflowDetail() {
     renderWorkflowNormalDetail(step);
   } else if (step.type === "split") {
     renderWorkflowSplitDetail(step);
+  } else if (step.type === "merge") {
+    renderWorkflowMergeDetail(step);
   } else if (step.type === "export") {
     renderWorkflowExportDetail(step);
   } else if (step.type === "rename") {
@@ -5790,6 +6036,28 @@ def merge_specs_from_form(form: cgi.FieldStorage) -> dict[str, dict[str, str]]:
     return specs
 
 
+def workflow_merge_specs_from_value(raw_value: object) -> dict[str, dict[str, str]]:
+    raw = raw_value if isinstance(raw_value, dict) else {}
+    specs: dict[str, dict[str, str]] = {}
+    for key, fallback in (("r", "default0"), ("g", "default0"), ("b", "default0"), ("a", "default255")):
+        raw_spec = raw.get(key, {})
+        spec = raw_spec if isinstance(raw_spec, dict) else {}
+        mode = str(spec.get("mode", fallback)).strip().lower()
+        if mode not in ("default0", "default255", "base", "file"):
+            mode = fallback
+        source_channel = str(spec.get("channel", "gray")).strip().lower()
+        if source_channel not in ("gray", "r", "g", "b", "a"):
+            source_channel = "gray"
+        file_value = spec.get("file", "")
+        file_text = "" if file_value is None else str(file_value).strip()
+        specs[key] = {
+            "mode": mode,
+            "file": file_text,
+            "channel": source_channel,
+        }
+    return specs
+
+
 def inspect_copy_report(source: Path, destination: Path) -> core.SaveReport:
     with Image.open(source) as opened:
         label = core.image_mode_label(ImageOps.exif_transpose(opened))
@@ -7117,7 +7385,6 @@ def normalized_output_format(value: object, allow_keep: bool = True, fallback: s
 
 WORKFLOW_PREVIEW_UNSUPPORTED_LABELS = {
     "pbr": "PBR辅助生成",
-    "merge": "通道合并/打包",
 }
 
 
@@ -7131,20 +7398,42 @@ def workflow_payload_from_form(form: cgi.FieldStorage) -> dict[str, object]:
     return payload
 
 
-def workflow_active_steps(payload: dict[str, object]) -> list[dict[str, object]]:
+def workflow_steps_from_payload(payload: dict[str, object]) -> list[dict[str, object]]:
     raw_steps = payload.get("steps", [])
     if not isinstance(raw_steps, list):
         raise ValueError("工作流步骤数据无效")
     steps: list[dict[str, object]] = []
     for raw in raw_steps:
-        if not isinstance(raw, dict) or raw.get("enabled", True) is False:
+        if not isinstance(raw, dict):
             continue
         step_type = str(raw.get("type", "")).strip().lower()
         if not step_type:
             continue
         options = raw.get("options", {})
-        steps.append({"type": step_type, "options": options if isinstance(options, dict) else {}})
+        step_id = str(raw.get("id", "")).strip()
+        steps.append(
+            {
+                "id": step_id,
+                "type": step_type,
+                "enabled": raw.get("enabled", True) is not False,
+                "options": options if isinstance(options, dict) else {},
+            }
+        )
     return steps
+
+
+def workflow_active_steps(payload: dict[str, object]) -> list[dict[str, object]]:
+    return [step for step in workflow_steps_from_payload(payload) if step.get("enabled", True)]
+
+
+def workflow_item_source_label(item: dict[str, object]) -> str:
+    source = str(item.get("source", "")).strip()
+    if source:
+        return source
+    source_path = item.get("source_path")
+    if isinstance(source_path, Path):
+        return source_path.name
+    return "工作流项目"
 
 
 def workflow_source_items(paths: list[Path]) -> list[dict[str, object]]:
@@ -7360,6 +7649,112 @@ def workflow_split_items(items: list[dict[str, object]], options: dict[str, obje
     return split_items
 
 
+def workflow_parse_item_index(value: object, items: list[dict[str, object]], label: str) -> int:
+    try:
+        index = int(str(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} 没有选择有效来源") from exc
+    if index < 0 or index >= len(items):
+        raise ValueError(f"{label} 来源索引无效")
+    return index
+
+
+def workflow_build_merge_result(
+    items: list[dict[str, object]],
+    base_value: object,
+    specs: dict[str, dict[str, str]],
+) -> tuple[Image.Image, dict[str, Image.Image], dict[str, object]]:
+    base_index: int | None = None
+    base_image: Image.Image | None = None
+    selected_indices: list[int] = []
+    for key in ("r", "g", "b", "a"):
+        spec = specs[key]
+        if spec["mode"] == "file" and str(spec.get("file", "")).strip() != "":
+            selected_indices.append(workflow_parse_item_index(spec["file"], items, f"目标 {key.upper()}"))
+
+    render_cache: dict[int, tuple[Image.Image, bytes | None, bool]] = {}
+
+    def render_item_at(index: int) -> tuple[Image.Image, bytes | None, bool]:
+        cached = render_cache.get(index)
+        if cached is not None:
+            return cached
+        rendered = workflow_render_item_image(items[index], "auto")
+        render_cache[index] = rendered
+        return rendered
+
+    if str(base_value).strip() != "":
+        base_index = workflow_parse_item_index(base_value, items, "基础图")
+        base_image = render_item_at(base_index)[0].convert("RGBA")
+        size = base_image.size
+    elif selected_indices:
+        size = render_item_at(selected_indices[0])[0].size
+    else:
+        raise ValueError("工作流通道合并至少需要基础图或一个来源文件通道")
+
+    channels: dict[str, Image.Image] = {}
+    for key, default in (("r", 0), ("g", 0), ("b", 0), ("a", 255)):
+        spec = specs[key]
+        mode = spec["mode"]
+        if mode == "default255":
+            channels[key] = Image.new("L", size, 255)
+        elif mode == "base":
+            if base_image is None:
+                raise ValueError(f"目标 {key.upper()} 选择了保留基础图，但没有选择基础图")
+            channels[key] = extract_channel_image(base_image, key, size)
+        elif mode == "file":
+            file_index = workflow_parse_item_index(spec["file"], items, f"目标 {key.upper()}")
+            source_image = render_item_at(file_index)[0]
+            channels[key] = extract_channel_image(source_image, spec["channel"], size)
+        else:
+            channels[key] = Image.new("L", size, default)
+
+    image = Image.merge("RGBA", (channels["r"], channels["g"], channels["b"], channels["a"]))
+    source_item = items[base_index] if base_index is not None else items[selected_indices[0]]
+    return image, channels, source_item
+
+
+def workflow_merge_items(items: list[dict[str, object]], options: dict[str, object]) -> list[dict[str, object]]:
+    specs = workflow_merge_specs_from_value(options.get("specs", {}))
+    base_value = str(options.get("base", "")).strip()
+    output_name = safe_stem(str(options.get("output_name", "merged_rgba")), "merged_rgba")
+    output_format = normalized_output_format(options.get("format", "png"), allow_keep=False, fallback="png")
+    image, _channels, source_item = workflow_build_merge_result(items, base_value, specs)
+    source_path = source_item.get("source_path")
+    if not isinstance(source_path, Path):
+        raise ValueError("工作流通道合并来源无效")
+    texture_type, _detected_token = detect_texture_type(output_name, True)
+    merged_sources: list[dict[str, object]] = []
+    for source in items:
+        merged_source = dict(source)
+        image_ops = source.get("image_ops", [])
+        merged_source["image_ops"] = list(image_ops) if isinstance(image_ops, list) else []
+        merged_sources.append(merged_source)
+    merged_item = {
+        "source_path": source_path,
+        "source_index": 1,
+        "source": f"通道合并（{len(items)} 项上游结果）",
+        "stem": output_name,
+        "ext": output_format,
+        "size": image.size,
+        "size_label": f"{image.size[0]}x{image.size[1]}",
+        "texture_type": texture_type,
+        "notes": ["通道合并"],
+        "image_ops": [],
+        "image_mode": "RGBA",
+        "has_alpha": True,
+        "resize_applied": False,
+        "crop_applied": False,
+        "resize_profile": "detail",
+        "export_applied": False,
+        "quality": 95,
+        "lossless": True,
+        "merge_base": base_value,
+        "merge_specs": specs,
+        "merge_sources": merged_sources,
+    }
+    return [merged_item]
+
+
 def workflow_crop_output_stem(
     item: dict[str, object],
     crop: dict[str, float | str],
@@ -7447,6 +7842,7 @@ def workflow_rename_stem(item: dict[str, object], source_index: int, options: di
     source = item["source_path"]
     if not isinstance(source, Path):
         raise ValueError("工作流命名来源无效")
+    fallback_name = safe_stem(str(item.get("stem", source.stem)), source.stem or f"texture_{source_index}")
     texture_type = str(item.get("texture_type", ""))
     if not texture_type:
         texture_type, _detected_token = detect_texture_type(str(item.get("stem", source.stem)), True)
@@ -7484,7 +7880,7 @@ def workflow_rename_stem(item: dict[str, object], source_index: int, options: di
                 str(step.get("right", "")),
                 insert_text,
             )
-    return safe_stem(tokens["name"], source.stem or f"texture_{source_index}")
+    return safe_stem(tokens["name"], fallback_name)
 
 
 def workflow_apply_rename_step(items: list[dict[str, object]], options: dict[str, object]) -> None:
@@ -7495,6 +7891,64 @@ def workflow_apply_rename_step(items: list[dict[str, object]], options: dict[str
         if output_format != "keep":
             item["ext"] = output_format
         item["notes"] = [*item.get("notes", []), "命名规则"]
+
+
+def workflow_apply_step(
+    items: list[dict[str, object]],
+    step_type: str,
+    options: dict[str, object],
+) -> tuple[list[dict[str, object]], str | None]:
+    if step_type == "resize":
+        return workflow_resize_items(items, options), None
+    if step_type == "crop":
+        return workflow_crop_items(items, options), None
+    if step_type == "normal":
+        workflow_apply_normal_step(items, options)
+        return items, None
+    if step_type == "split":
+        return workflow_split_items(items, options), None
+    if step_type == "merge":
+        return workflow_merge_items(items, options), None
+    if step_type == "export":
+        workflow_apply_export_step(items, options)
+        return items, None
+    if step_type == "rename":
+        workflow_apply_rename_step(items, options)
+        return items, None
+    return items, WORKFLOW_PREVIEW_UNSUPPORTED_LABELS.get(step_type, step_type)
+
+
+def workflow_items_before_step(
+    paths: list[Path],
+    payload: dict[str, object],
+    step_id: str,
+    *,
+    strict_supported: bool,
+) -> tuple[list[dict[str, object]], list[str]]:
+    steps = workflow_steps_from_payload(payload)
+    items = workflow_source_items(paths)
+    warnings_list: list[str] = []
+    unsupported_types: list[str] = []
+    found = False
+    for step in steps:
+        current_id = str(step.get("id", ""))
+        if current_id == step_id:
+            found = True
+            break
+        if not step.get("enabled", True):
+            continue
+        step_type = str(step["type"])
+        options = step["options"] if isinstance(step["options"], dict) else {}
+        items, unsupported = workflow_apply_step(items, step_type, options)
+        if unsupported and unsupported not in unsupported_types:
+            unsupported_types.append(unsupported)
+    if not found:
+        raise ValueError("没有找到当前工作流步骤")
+    if unsupported_types:
+        if strict_supported:
+            raise ValueError(f"当前工作流暂不支持在此步骤之前执行这些步骤：{'、'.join(unsupported_types)}")
+        warnings_list.append(f"{'、'.join(unsupported_types)}暂未参与上游来源计算")
+    return items, warnings_list
 
 
 def workflow_output_items(
@@ -7516,22 +7970,9 @@ def workflow_output_items(
     for step in steps:
         step_type = str(step["type"])
         options = step["options"] if isinstance(step["options"], dict) else {}
-        if step_type == "resize":
-            items = workflow_resize_items(items, options)
-        elif step_type == "crop":
-            items = workflow_crop_items(items, options)
-        elif step_type == "normal":
-            workflow_apply_normal_step(items, options)
-        elif step_type == "split":
-            items = workflow_split_items(items, options)
-        elif step_type == "export":
-            workflow_apply_export_step(items, options)
-        elif step_type == "rename":
-            workflow_apply_rename_step(items, options)
-        else:
-            label = WORKFLOW_PREVIEW_UNSUPPORTED_LABELS.get(step_type, step_type)
-            if label not in unsupported_types:
-                unsupported_types.append(label)
+        items, unsupported = workflow_apply_step(items, step_type, options)
+        if unsupported and unsupported not in unsupported_types:
+            unsupported_types.append(unsupported)
 
     if unsupported_types:
         if strict_supported:
@@ -7607,6 +8048,30 @@ def workflow_preview_plan(paths: list[Path], output_dir: Path, form: cgi.FieldSt
     }
 
 
+def workflow_merge_sources_payload(paths: list[Path], payload: dict[str, object], step_id: str) -> dict[str, object]:
+    items, warnings_list = workflow_items_before_step(paths, payload, step_id, strict_supported=True)
+    payload_items = []
+    for index, item in enumerate(items):
+        payload_items.append(
+            {
+                "index": index,
+                "source": workflow_item_source_label(item),
+                "stem": str(item.get("stem", "")),
+                "size": str(item.get("size_label", "")),
+                "mode": str(item.get("image_mode", "")),
+                "format": str(item.get("ext", "")).upper(),
+                "channels": [label for _key, label in workflow_split_available_channels(item)],
+                "notes": " / ".join(str(note) for note in item.get("notes", [])),
+            }
+        )
+    return {
+        "ok": True,
+        "total": len(payload_items),
+        "items": payload_items,
+        "warnings": warnings_list,
+    }
+
+
 def workflow_resized_image(source_image: Image.Image, size: tuple[int, int], profile_key: str) -> Image.Image:
     profile = core.PROFILES.get(profile_key, core.PROFILES["detail"])
     if source_image.size == size:
@@ -7615,24 +8080,36 @@ def workflow_resized_image(source_image: Image.Image, size: tuple[int, int], pro
     return core.apply_unsharp_mask(resized, profile.default_sharpen)
 
 
-def save_workflow_item(item: dict[str, object], source: Path, destination: Path, channel_mode: str) -> core.SaveReport:
-    image_ops = item.get("image_ops", [])
-    if not isinstance(image_ops, list):
-        image_ops = []
-    if (
-        not image_ops
-        and not item.get("export_applied")
-        and destination.suffix.lower() == source.suffix.lower()
-        and core.normalize_channel_mode(channel_mode) == "auto"
-    ):
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
-        return inspect_copy_report(source, destination)
+def workflow_item_has_merge_sources(item: dict[str, object]) -> bool:
+    merge_sources = item.get("merge_sources")
+    merge_specs = item.get("merge_specs")
+    return isinstance(merge_sources, list) and isinstance(merge_specs, dict)
 
+
+def workflow_render_item_base(item: dict[str, object], channel_mode: str) -> tuple[Image.Image, bytes | None, bool]:
+    if workflow_item_has_merge_sources(item):
+        merge_sources = item.get("merge_sources", [])
+        if not isinstance(merge_sources, list):
+            raise ValueError("工作流通道合并来源无效")
+        specs = workflow_merge_specs_from_value(item.get("merge_specs", {}))
+        image, _channels, _source_item = workflow_build_merge_result(merge_sources, item.get("merge_base", ""), specs)
+        return image, None, True
+
+    source = item.get("source_path")
+    if not isinstance(source, Path):
+        raise ValueError("工作流来源无效")
     with Image.open(source) as opened:
         image = ImageOps.exif_transpose(opened)
         source_had_alpha = core.image_has_alpha(image)
         icc_profile = opened.info.get("icc_profile")
+    return image, icc_profile, source_had_alpha
+
+
+def workflow_render_item_image(item: dict[str, object], channel_mode: str) -> tuple[Image.Image, bytes | None, bool]:
+    image_ops = item.get("image_ops", [])
+    if not isinstance(image_ops, list):
+        image_ops = []
+    image, icc_profile, source_had_alpha = workflow_render_item_base(item, channel_mode)
 
     for operation in image_ops:
         if not isinstance(operation, dict):
@@ -7672,6 +8149,25 @@ def save_workflow_item(item: dict[str, object], source: Path, destination: Path,
         if isinstance(size, tuple) and len(size) == 2:
             image = workflow_resized_image(image, (int(size[0]), int(size[1])), str(item.get("resize_profile", "detail")))
 
+    return image, icc_profile, source_had_alpha
+
+
+def save_workflow_item(item: dict[str, object], source: Path, destination: Path, channel_mode: str) -> core.SaveReport:
+    image_ops = item.get("image_ops", [])
+    if not isinstance(image_ops, list):
+        image_ops = []
+    if (
+        not workflow_item_has_merge_sources(item)
+        and not image_ops
+        and not item.get("export_applied")
+        and destination.suffix.lower() == source.suffix.lower()
+        and core.normalize_channel_mode(channel_mode) == "auto"
+    ):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        return inspect_copy_report(source, destination)
+
+    image, icc_profile, _source_had_alpha = workflow_render_item_image(item, channel_mode)
     if item.get("export_applied"):
         quality = int(item.get("quality", 95))
         lossless = bool(item.get("lossless", True))
@@ -8013,6 +8509,15 @@ class ToolboxHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
+        if path == "/workflow-merge-sources":
+            mark_browser_alive(self.server)
+            try:
+                self.handle_workflow_merge_sources()
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if path == "/check-conflicts":
             mark_browser_alive(self.server)
             try:
@@ -8208,6 +8713,25 @@ class ToolboxHandler(BaseHTTPRequestHandler):
             if upload_dir is not None:
                 cleanup_uploads(upload_dir)
 
+    def handle_workflow_merge_sources(self) -> None:
+        form = self.parse_form()
+        upload_dir, paths = collect_source_paths(form)
+        try:
+            if not paths:
+                raise ValueError("没有可用于读取工作流上游来源的图片")
+            step_id = str(form.getfirst("step_id", "")).strip()
+            if not step_id:
+                raise ValueError("缺少工作流步骤标识")
+            payload = workflow_payload_from_form(form)
+            result = workflow_merge_sources_payload(paths, payload, step_id)
+            if upload_dir is not None:
+                cleanup_uploads(upload_dir)
+                upload_dir = None
+            self.send_json(200, result)
+        finally:
+            if upload_dir is not None:
+                cleanup_uploads(upload_dir)
+
     def handle_check_conflicts(self) -> None:
         form = self.parse_form()
         upload_dir, paths = collect_source_paths(form)
@@ -8395,7 +8919,7 @@ class ToolboxHandler(BaseHTTPRequestHandler):
                     report = save_workflow_item(item, source, destination, channel_mode)
                     notes = str(item.get("notes_text", "")).strip()
                     note_text = f" [工作流: {notes}]" if notes else ""
-                    log_lines.append(f"{source.name} -> {report.path.name}{note_text}" + report_summary([report]))
+                    log_lines.append(f"{workflow_item_source_label(item)} -> {report.path.name}{note_text}" + report_summary([report]))
             else:
                 raise ValueError(f"Unknown tool: {tool}")
         finally:
