@@ -1930,9 +1930,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     <div class="section-head">
       <div>
         <strong>工作流模式 Beta</strong>
-        <div class="muted">当前可真实执行：缩放、格式与压缩、命名规则；其他步骤继续在 Beta 中迭代接入。</div>
+        <div class="muted">当前可真实执行：图片裁切、缩放、格式与压缩、命名规则；其他步骤继续在 Beta 中迭代接入。</div>
       </div>
-      <span class="workflow-badge">阶段 4 / 首条执行链 Beta</span>
+      <span class="workflow-badge">阶段 5 / 裁切执行链 Beta</span>
     </div>
     <div class="workflow-grid">
       <div class="workflow-column">
@@ -1964,7 +1964,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <button id="workflow-load" class="secondary" type="button">载入工作流 JSON</button>
           <input id="workflow-load-input" type="file" accept=".json,application/json" hidden>
         </div>
-        <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：缩放 / 格式与压缩 / 命名规则；其余步骤先保留结构和预览。</div>
+        <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：图片裁切 / 缩放 / 格式与压缩 / 命名规则；其余步骤先保留结构和预览。</div>
       </div>
       <div class="workflow-column">
         <div class="workflow-column-title">参数与输出摘要</div>
@@ -1993,7 +1993,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <progress id="workflow-run-progress" max="100" value="0"></progress>
           <div id="workflow-run-status" class="run-status muted">等待执行。</div>
         </div>
-        <div class="notice" style="margin-top:14px;">工作流 Beta 当前可真实导出：缩放、格式与压缩、命名规则。裁切、法线/黑白调整、通道拆分、通道合并会在后续阶段继续接入。</div>
+        <div class="notice" style="margin-top:14px;">工作流 Beta 当前可真实导出：图片裁切、缩放、格式与压缩、命名规则。法线/黑白调整、通道拆分、通道合并会在后续阶段继续接入。</div>
       </div>
     </div>
   </section>
@@ -2576,7 +2576,7 @@ const workflowStepDefinitions = {
   crop: {
     label: "图片裁切",
     summary: "记录裁切框和多图同位置裁切策略。",
-    detail: "参数占位：单图/多图同位置、自由框选、1:1、自定义像素、九宫格吸附、裁切命名。"
+    detail: "复用图片裁切模块的单图/多图同位置、参考图、裁切命名模板和输出格式；裁切框需要先在快速工具模式中框选后再同步。"
   },
   normal: {
     label: "法线/黑白调整",
@@ -2659,12 +2659,51 @@ function workflowNormalizeSizes(value) {
 function workflowDefaultRenameStep() {
   return { op: "replace", find: "", replace: "", prefix: "", suffix: "", left: "", right: "", insert: "" };
 }
+function workflowNormalizeCropItems(value) {
+  if (!Array.isArray(value)) return [];
+  const items = [];
+  value.forEach((raw, index) => {
+    if (!raw || typeof raw !== "object") return;
+    const x = Math.max(0, Math.min(1, Number(raw.x) || 0));
+    const y = Math.max(0, Math.min(1, Number(raw.y) || 0));
+    let w = Math.max(0, Math.min(1, Number(raw.w) || 0));
+    let h = Math.max(0, Math.min(1, Number(raw.h) || 0));
+    if (x + w > 1) w = 1 - x;
+    if (y + h > 1) h = 1 - y;
+    if (w <= 0 || h <= 0) return;
+    items.push({
+      x,
+      y,
+      w,
+      h,
+      name: String(raw.name || `{name}_crop${items.length + 1}`).trim() || `{name}_crop${index + 1}`,
+    });
+  });
+  return items;
+}
+function currentCropWorkflowOptions() {
+  return workflowMergeOptions("crop", {
+    mode: document.querySelector('input[name="crop-mode"]:checked')?.value || "single",
+    source_index: Math.max(0, Math.floor(Number(cropSourceFile.value) || 0)),
+    format: document.getElementById("crop-format").value || "keep",
+    crops: cropItems.map(item => ({
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+      name: item.name,
+    })),
+  });
+}
 function workflowDefaultOptions(type) {
   if (type === "resize") {
     return { sizes: [], custom: "", profile: "detail", format: "keep", preserve: true, append_size_suffix: true };
   }
   if (type === "export") {
     return { format: "png", quality: 95, lossless: true };
+  }
+  if (type === "crop") {
+    return { mode: "single", source_index: 0, format: "keep", crops: [] };
   }
   if (type === "rename") {
     return { format: "keep", steps: [workflowDefaultRenameStep()] };
@@ -2681,6 +2720,11 @@ function workflowMergeOptions(type, options) {
     merged.format = merged.format === "keep" || workflowFormatValues.includes(merged.format) ? merged.format : "keep";
     merged.preserve = merged.preserve !== false;
     merged.append_size_suffix = merged.append_size_suffix !== false;
+  } else if (type === "crop") {
+    merged.mode = merged.mode === "batch" ? "batch" : "single";
+    merged.source_index = Math.max(0, Math.floor(Number(merged.source_index) || 0));
+    merged.format = merged.format === "keep" || workflowFormatValues.includes(merged.format) ? merged.format : "keep";
+    merged.crops = workflowNormalizeCropItems(merged.crops);
   } else if (type === "export") {
     merged.format = workflowFormatValues.includes(merged.format) ? merged.format : "png";
     merged.quality = Math.max(80, Math.min(100, Math.round(Number(merged.quality) || 95)));
@@ -2717,6 +2761,7 @@ function currentRenameWorkflowOptions() {
 function workflowInitialOptions(type) {
   try {
     if (type === "resize") return currentResizeWorkflowOptions();
+    if (type === "crop") return currentCropWorkflowOptions();
     if (type === "export") return currentExportWorkflowOptions();
     if (type === "rename") return currentRenameWorkflowOptions();
   } catch (_error) {
@@ -2762,6 +2807,12 @@ function workflowStepSummary(step) {
     const sizeText = workflowResizeSizeParts(options).join(" / ") || "未选择尺寸";
     const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
     return `${sizeText}，${workflowProfileLabels[options.profile].split(" - ")[0]}，${formatText}${options.append_size_suffix ? "，尺寸后缀" : ""}`;
+  }
+  if (step.type === "crop") {
+    const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
+    const cropCount = options.crops.length || 0;
+    const sourceText = options.mode === "single" ? `第 ${options.source_index + 1} 张参考图` : "全部输入";
+    return `${options.mode === "batch" ? "多图同位置" : "单图"}，${sourceText}，${cropCount} 个裁切，${formatText}`;
   }
   if (step.type === "export") {
     const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
@@ -2878,14 +2929,28 @@ function updateWorkflowSummary() {
   workflowSummaryInputs.textContent = String(items.length);
   workflowSummarySteps.textContent = String(workflowSteps.length);
   const activeSteps = workflowSteps.filter(step => step.enabled);
-  let outputMultiplier = 1;
+  let counts = items.map(() => 1);
   for (const step of activeSteps) {
     if (step.type === "resize") {
       const options = workflowMergeOptions("resize", step.options);
-      outputMultiplier = Math.max(outputMultiplier, Math.max(1, workflowResizeSizeParts(options).length));
+      const multiplier = Math.max(1, workflowResizeSizeParts(options).length);
+      counts = counts.map(count => count * multiplier);
+    } else if (step.type === "crop") {
+      const options = workflowMergeOptions("crop", step.options);
+      const multiplier = options.crops.length;
+      if (!multiplier) {
+        counts = counts.map(() => 0);
+        continue;
+      }
+      if (options.mode === "single") {
+        counts = counts.map((count, index) => index === options.source_index ? count * multiplier : 0);
+      } else {
+        counts = counts.map(count => count * multiplier);
+      }
     }
   }
-  workflowSummaryOutputs.textContent = items.length ? `约 ${items.length * outputMultiplier} 个输出（Beta估算）` : "待接入";
+  const estimatedOutputs = counts.reduce((sum, count) => sum + count, 0);
+  workflowSummaryOutputs.textContent = items.length ? (estimatedOutputs ? `约 ${estimatedOutputs} 个输出（Beta估算）` : "待配置") : "待接入";
   const renameStep = activeSteps.find(step => step.type === "rename");
   workflowSummaryNaming.textContent = renameStep ? workflowStepSummary(renameStep) : "待接入";
   workflowSummaryConflicts.textContent = activeSteps.length ? "执行前统一检查" : "待接入";
@@ -3002,6 +3067,99 @@ function renderWorkflowExportDetail(step) {
   });
   workflowDetailBody.appendChild(card);
 }
+function renderWorkflowCropDetail(step) {
+  step.options = workflowMergeOptions("crop", step.options);
+  const options = step.options;
+  const sources = workflowInputItems();
+  const sourceOptions = sources.length
+    ? sources.map((item, index) => `<option value="${index}"${index === options.source_index ? " selected" : ""}>第 ${index + 1} 张 | ${escapeHtml(item.name || `图片 ${index + 1}`)}</option>`).join("")
+    : `<option value="0" selected>当前还没有可选图片</option>`;
+  const card = document.createElement("div");
+  card.className = "workflow-param-card";
+  card.innerHTML = `
+    <div class="workflow-param-actions">
+      <button class="secondary" type="button" data-workflow-sync>读取当前图片裁切模块设置</button>
+      <span class="muted">裁切框先在快速工具模式的图片裁切里框选，再同步到工作流。</span>
+    </div>
+    <div class="workflow-param-grid">
+      <label>裁切模式
+        <select data-workflow-crop-mode>
+          <option value="single"${options.mode === "single" ? " selected" : ""}>单图</option>
+          <option value="batch"${options.mode === "batch" ? " selected" : ""}>多图同位置</option>
+        </select>
+      </label>
+      <label>参考图片
+        <select data-workflow-crop-source>${sourceOptions}</select>
+      </label>
+      <label>输出格式
+        <select data-workflow-format>${workflowFormatOptionHtml(options.format, true)}</select>
+      </label>
+    </div>
+    <div class="muted" data-workflow-crop-info></div>
+    <div class="workflow-param-list" data-workflow-crop-list></div>
+    <div class="muted">工作流裁切命名里的 {name} 会替换为当前流程中的文件名基础；多图同位置时，如果模板不含 {name}，导出时会自动补上当前文件名，避免同格式图片互相覆盖。</div>
+  `;
+  const modeSelect = card.querySelector("[data-workflow-crop-mode]");
+  const sourceSelect = card.querySelector("[data-workflow-crop-source]");
+  const formatSelect = card.querySelector("[data-workflow-format]");
+  const info = card.querySelector("[data-workflow-crop-info]");
+  const list = card.querySelector("[data-workflow-crop-list]");
+  const renderCropInfo = () => {
+    sourceSelect.disabled = modeSelect.value === "batch" || !sources.length;
+    const cropCount = options.crops.length;
+    const sourceText = modeSelect.value === "batch"
+      ? "会把当前步骤中所有同尺寸图片都按同一裁切框批量裁切。"
+      : (sources[Number(sourceSelect.value) || 0]
+        ? `当前参考图：第 ${Number(sourceSelect.value) + 1} 张。`
+        : "当前没有可用参考图。");
+    info.textContent = cropCount
+      ? `${sourceText} 当前已记录 ${cropCount} 个裁切框。多图同位置模式要求进入此步骤时所有候选图片当前尺寸一致。`
+      : "当前还没有裁切框。先去图片裁切模块框选后，再点上面的同步按钮。";
+    list.innerHTML = "";
+    if (!cropCount) {
+      const row = document.createElement("div");
+      row.innerHTML = "<span>裁切框</span><strong>未设置</strong>";
+      list.appendChild(row);
+      return;
+    }
+    options.crops.forEach((crop, index) => {
+      const row = document.createElement("div");
+      const label = document.createElement("span");
+      label.textContent = `裁切 ${index + 1}`;
+      const value = document.createElement("strong");
+      value.textContent = `${crop.name || `{name}_crop${index + 1}`} | ${(crop.w * 100).toFixed(1)}% x ${(crop.h * 100).toFixed(1)}% | 左上 ${(crop.x * 100).toFixed(1)}%, ${(crop.y * 100).toFixed(1)}%`;
+      row.appendChild(label);
+      row.appendChild(value);
+      list.appendChild(row);
+    });
+  };
+  const apply = () => {
+    step.options = workflowMergeOptions("crop", {
+      ...step.options,
+      mode: modeSelect.value,
+      source_index: Math.max(0, Math.floor(Number(sourceSelect.value) || 0)),
+      format: formatSelect.value,
+    });
+    refreshWorkflowAfterOptionChange(step);
+  };
+  card.querySelector("[data-workflow-sync]").onclick = () => {
+    step.options = currentCropWorkflowOptions();
+    workflowStatus("已读取当前图片裁切模块设置。");
+    renderWorkflowShell();
+  };
+  modeSelect.onchange = () => {
+    options.mode = modeSelect.value;
+    renderCropInfo();
+    apply();
+  };
+  sourceSelect.onchange = () => {
+    renderCropInfo();
+    apply();
+  };
+  formatSelect.onchange = apply;
+  renderCropInfo();
+  workflowDetailBody.appendChild(card);
+}
 function workflowRenameOpLabel(op) {
   return {
     replace: "查找替换",
@@ -3091,6 +3249,8 @@ function renderWorkflowDetail() {
   appendWorkflowDetailNote(definition);
   if (step.type === "resize") {
     renderWorkflowResizeDetail(step);
+  } else if (step.type === "crop") {
+    renderWorkflowCropDetail(step);
   } else if (step.type === "export") {
     renderWorkflowExportDetail(step);
   } else if (step.type === "rename") {
@@ -6432,11 +6592,7 @@ def save_renamed_copy(source: Path, destination: Path, format_name: str, channel
         return core.save_image(image, source, destination, format_name == "keep", opened.info.get("icc_profile"), channel_mode)
 
 
-def crop_items_from_form(form: cgi.FieldStorage) -> list[dict[str, float | str]]:
-    try:
-        raw_items = json.loads(form.getfirst("crops", "[]"))
-    except json.JSONDecodeError as exc:
-        raise ValueError("裁切数据格式无效") from exc
+def crop_items_from_value(raw_items: object) -> list[dict[str, float | str]]:
     if not isinstance(raw_items, list):
         raise ValueError("裁切数据格式无效")
     crops: list[dict[str, float | str]] = []
@@ -6469,6 +6625,14 @@ def crop_items_from_form(form: cgi.FieldStorage) -> list[dict[str, float | str]]
     return crops
 
 
+def crop_items_from_form(form: cgi.FieldStorage) -> list[dict[str, float | str]]:
+    try:
+        raw_items = json.loads(form.getfirst("crops", "[]"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("裁切数据格式无效") from exc
+    return crop_items_from_value(raw_items)
+
+
 def crop_pixel_box(size: tuple[int, int], crop: dict[str, float | str]) -> tuple[int, int, int, int]:
     width, height = size
     left = int(round(float(crop["x"]) * width))
@@ -6482,18 +6646,36 @@ def crop_pixel_box(size: tuple[int, int], crop: dict[str, float | str]) -> tuple
     return left, top, right, bottom
 
 
-def crop_output_stem(template: str, source: Path, crop_index: int, force_source_name: bool = False) -> str:
-    ext = source.suffix.lstrip(".").lower()
+def crop_output_stem_tokens(
+    template: str,
+    name_value: str,
+    ext: str,
+    crop_index: int,
+    *,
+    fallback: str,
+    force_source_name: bool = False,
+) -> str:
     raw_template = template or f"{{name}}_crop{crop_index}"
     if force_source_name and "{name}" not in raw_template:
         raw_template = f"{{name}}_{raw_template}"
     value = (
         raw_template
-        .replace("{name}", source.stem)
+        .replace("{name}", name_value)
         .replace("{index}", str(crop_index).zfill(2))
         .replace("{ext}", ext)
     )
-    return safe_stem(value, f"{source.stem}_crop{crop_index}")
+    return safe_stem(value, fallback)
+
+
+def crop_output_stem(template: str, source: Path, crop_index: int, force_source_name: bool = False) -> str:
+    return crop_output_stem_tokens(
+        template,
+        source.stem,
+        source.suffix.lstrip(".").lower(),
+        crop_index,
+        fallback=f"{source.stem}_crop{crop_index}",
+        force_source_name=force_source_name,
+    )
 
 
 def crop_output_path(
@@ -6596,7 +6778,6 @@ def normalized_output_format(value: object, allow_keep: bool = True, fallback: s
 
 
 WORKFLOW_PREVIEW_UNSUPPORTED_LABELS = {
-    "crop": "图片裁切",
     "normal": "法线/黑白调整",
     "pbr": "PBR辅助生成",
     "split": "通道拆分",
@@ -6647,7 +6828,9 @@ def workflow_source_items(paths: list[Path]) -> list[dict[str, object]]:
                     "size_label": f"{image.size[0]}x{image.size[1]}",
                     "texture_type": texture_type,
                     "notes": [],
+                    "image_ops": [],
                     "resize_applied": False,
+                    "crop_applied": False,
                     "resize_profile": "detail",
                     "export_applied": False,
                     "quality": 95,
@@ -6701,6 +6884,10 @@ def workflow_resize_items(items: list[dict[str, object]], options: dict[str, obj
             next_item["size_label"] = f"{dimensions[0]}x{dimensions[1]}"
             next_item["resize_applied"] = True
             next_item["resize_profile"] = profile_key
+            next_item["image_ops"] = [
+                *item.get("image_ops", []),
+                {"op": "resize", "size": [dimensions[0], dimensions[1]], "profile": profile_key},
+            ]
             next_item["stem"] = f"{item['stem']}_{dimensions[0]}x{dimensions[1]}" if append_size_suffix else str(item["stem"])
             if output_format != "keep":
                 next_item["ext"] = output_format
@@ -6721,6 +6908,89 @@ def workflow_apply_export_step(items: list[dict[str, object]], options: dict[str
         item["notes"] = [*item.get("notes", []), f"导出 {output_format.upper()}"]
 
 
+def workflow_crop_output_stem(
+    item: dict[str, object],
+    crop: dict[str, float | str],
+    crop_index: int,
+    force_source_name: bool,
+    format_override: str = "keep",
+) -> str:
+    source = item.get("source_path")
+    if not isinstance(source, Path):
+        raise ValueError("工作流裁切来源无效")
+    current_stem = safe_stem(str(item.get("stem", source.stem)), source.stem)
+    current_ext = normalized_output_format(
+        format_override if format_override != "keep" else item.get("ext", source.suffix.lstrip(".").lower()),
+        allow_keep=False,
+        fallback=source.suffix.lstrip(".").lower() or "png",
+    )
+    return crop_output_stem_tokens(
+        str(crop.get("name", f"{{name}}_crop{crop_index}")),
+        current_stem,
+        current_ext,
+        crop_index,
+        fallback=f"{current_stem}_crop{crop_index}",
+        force_source_name=force_source_name,
+    )
+
+
+def workflow_crop_items(items: list[dict[str, object]], options: dict[str, object]) -> list[dict[str, object]]:
+    crops = crop_items_from_value(options.get("crops", []))
+    mode = "batch" if str(options.get("mode", "single")).strip().lower() == "batch" else "single"
+    try:
+        source_index = max(0, int(options.get("source_index", 0)))
+    except (TypeError, ValueError):
+        source_index = 0
+    force_source_name = mode == "batch"
+    output_format = normalized_output_format(options.get("format", "keep"), allow_keep=True, fallback="keep")
+
+    if mode == "single":
+        selected_items = [item for item in items if int(item.get("source_index", 0)) == source_index + 1]
+        if not selected_items:
+            raise ValueError("工作流图片裁切步骤所选参考图不存在")
+    else:
+        selected_items = list(items)
+        sizes = {
+            tuple(item.get("size", (0, 0)))
+            for item in selected_items
+            if isinstance(item.get("size"), tuple) and len(item.get("size", ())) == 2
+        }
+        if len(sizes) > 1:
+            detail = "; ".join(f"{size[0]}x{size[1]}" for size in sorted(sizes))
+            raise ValueError(f"工作流多图同位置裁切要求进入此步骤的图片当前尺寸一致：{detail}")
+
+    cropped_items: list[dict[str, object]] = []
+    for item in selected_items:
+        current_size = item.get("size", (1, 1))
+        if not isinstance(current_size, tuple) or len(current_size) != 2:
+            current_size = (1, 1)
+        for crop_index, crop in enumerate(crops, start=1):
+            box = crop_pixel_box((int(current_size[0]), int(current_size[1])), crop)
+            dimensions = (box[2] - box[0], box[3] - box[1])
+            next_item = dict(item)
+            next_item["size"] = dimensions
+            next_item["size_label"] = f"{dimensions[0]}x{dimensions[1]}"
+            next_item["crop_applied"] = True
+            next_item["image_ops"] = [
+                *item.get("image_ops", []),
+                {
+                    "op": "crop",
+                    "crop": {
+                        "x": float(crop["x"]),
+                        "y": float(crop["y"]),
+                        "w": float(crop["w"]),
+                        "h": float(crop["h"]),
+                    },
+                },
+            ]
+            next_item["stem"] = workflow_crop_output_stem(item, crop, crop_index, force_source_name, output_format)
+            if output_format != "keep":
+                next_item["ext"] = output_format
+            next_item["notes"] = [*item.get("notes", []), f"裁切 {crop_index:02d} {dimensions[0]}x{dimensions[1]}"]
+            cropped_items.append(next_item)
+    return cropped_items
+
+
 def workflow_rename_stem(item: dict[str, object], source_index: int, options: dict[str, object]) -> str:
     source = item["source_path"]
     if not isinstance(source, Path):
@@ -6728,10 +6998,11 @@ def workflow_rename_stem(item: dict[str, object], source_index: int, options: di
     texture_type = str(item.get("texture_type", ""))
     if not texture_type:
         texture_type, _detected_token = detect_texture_type(str(item.get("stem", source.stem)), True)
+    output_format = normalized_output_format(options.get("format", "keep"), allow_keep=True, fallback="keep")
     tokens = {
         "name": str(item.get("stem", source.stem)),
         "index": str(source_index),
-        "ext": str(item.get("ext", source.suffix.lstrip(".").lower())),
+        "ext": str(output_format if output_format != "keep" else item.get("ext", source.suffix.lstrip(".").lower())),
         "type": texture_type,
         "size": str(item.get("size_label", "")),
     }
@@ -6795,6 +7066,8 @@ def workflow_output_items(
         options = step["options"] if isinstance(step["options"], dict) else {}
         if step_type == "resize":
             items = workflow_resize_items(items, options)
+        elif step_type == "crop":
+            items = workflow_crop_items(items, options)
         elif step_type == "export":
             workflow_apply_export_step(items, options)
         elif step_type == "rename":
@@ -6887,8 +7160,11 @@ def workflow_resized_image(source_image: Image.Image, size: tuple[int, int], pro
 
 
 def save_workflow_item(item: dict[str, object], source: Path, destination: Path, channel_mode: str) -> core.SaveReport:
+    image_ops = item.get("image_ops", [])
+    if not isinstance(image_ops, list):
+        image_ops = []
     if (
-        not item.get("resize_applied")
+        not image_ops
         and not item.get("export_applied")
         and destination.suffix.lower() == source.suffix.lower()
         and core.normalize_channel_mode(channel_mode) == "auto"
@@ -6901,7 +7177,20 @@ def save_workflow_item(item: dict[str, object], source: Path, destination: Path,
         image = ImageOps.exif_transpose(opened)
         icc_profile = opened.info.get("icc_profile")
 
-    if item.get("resize_applied"):
+    for operation in image_ops:
+        if not isinstance(operation, dict):
+            continue
+        op_type = str(operation.get("op", "")).strip().lower()
+        if op_type == "resize":
+            size = operation.get("size", image.size)
+            if isinstance(size, list | tuple) and len(size) == 2:
+                image = workflow_resized_image(image, (int(size[0]), int(size[1])), str(operation.get("profile", "detail")))
+        elif op_type == "crop":
+            crop = operation.get("crop", {})
+            if isinstance(crop, dict):
+                image = image.crop(crop_pixel_box(image.size, crop))
+
+    if not image_ops and item.get("resize_applied"):
         size = item.get("size", image.size)
         if isinstance(size, tuple) and len(size) == 2:
             image = workflow_resized_image(image, (int(size[0]), int(size[1])), str(item.get("resize_profile", "detail")))
