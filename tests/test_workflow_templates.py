@@ -55,9 +55,10 @@ class WorkflowTemplateStorageTests(unittest.TestCase):
         }
 
     def test_workflow_template_roundtrip_and_listing(self) -> None:
-        meta, updated = tb.save_workflow_template("角色贴图流程", self.sample_payload(), "角色", "适合角色常规贴图导出")
+        meta, updated = tb.save_workflow_template("角色贴图流程", self.sample_payload(), "角色", "适合角色常规贴图导出", pinned=True)
         self.assertFalse(updated)
         self.assertEqual(meta["name"], "角色贴图流程")
+        self.assertTrue(meta["pinned"])
         self.assertEqual(meta["category"], "角色")
         self.assertEqual(meta["note"], "适合角色常规贴图导出")
         self.assertEqual(meta["step_count"], 2)
@@ -66,10 +67,12 @@ class WorkflowTemplateStorageTests(unittest.TestCase):
         items = tb.list_workflow_templates()
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["key"], meta["key"])
+        self.assertTrue(items[0]["pinned"])
         self.assertEqual(items[0]["category"], "角色")
 
         loaded = tb.load_workflow_template(str(meta["key"]))
         self.assertEqual(loaded["name"], "角色贴图流程")
+        self.assertTrue(loaded["pinned"])
         self.assertEqual(loaded["category"], "角色")
         self.assertEqual(loaded["note"], "适合角色常规贴图导出")
         self.assertEqual(len(loaded["steps"]), 2)
@@ -81,6 +84,23 @@ class WorkflowTemplateStorageTests(unittest.TestCase):
     def test_workflow_template_save_rejects_empty_steps(self) -> None:
         with self.assertRaisesRegex(ValueError, "没有步骤"):
             tb.save_workflow_template("空模板", {"steps": []})
+
+    def test_workflow_template_import_export_and_pin_sort(self) -> None:
+        first, _ = tb.save_workflow_template("场景流程", self.sample_payload(), "场景", "普通模板", pinned=False)
+        exported = tb.export_workflow_template(str(first["key"]))
+        self.assertFalse(exported["pinned"])
+
+        imported, renamed = tb.import_workflow_template_data(exported, "场景流程")
+        self.assertTrue(renamed)
+        self.assertNotEqual(imported["key"], first["key"])
+        self.assertEqual(imported["category"], "场景")
+
+        pinned = tb.set_workflow_template_pinned(str(imported["key"]), True)
+        self.assertTrue(pinned["pinned"])
+
+        items = tb.list_workflow_templates()
+        self.assertEqual(items[0]["key"], imported["key"])
+        self.assertTrue(items[0]["pinned"])
 
 
 if __name__ == "__main__":

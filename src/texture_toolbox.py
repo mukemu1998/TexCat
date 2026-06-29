@@ -2095,8 +2095,12 @@ button:disabled { opacity: .55; cursor: not-allowed; }
             <button id="workflow-template-save" class="secondary" type="button">保存当前为模板</button>
             <button id="workflow-template-load" class="secondary" type="button">套用模板</button>
             <button id="workflow-template-append" class="secondary" type="button">追加模板</button>
+            <button id="workflow-template-pin" class="secondary" type="button">置顶模板</button>
+            <button id="workflow-template-export" class="secondary" type="button">导出模板</button>
+            <button id="workflow-template-import" class="secondary" type="button">导入模板</button>
             <button id="workflow-template-delete" class="secondary" type="button">删除模板</button>
             <button id="workflow-template-clear" class="secondary" type="button">清空输入</button>
+            <input id="workflow-template-import-input" type="file" accept=".json,application/json" hidden>
           </div>
         </div>
         <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：图片裁切 / 法线与黑白调整 / 通道拆分 / 通道合并 / 缩放 / 格式与压缩 / 命名规则；PBR 仍先保留在快速工具模式。</div>
@@ -2284,8 +2288,12 @@ const workflowTemplateRefresh = document.getElementById("workflow-template-refre
 const workflowTemplateSave = document.getElementById("workflow-template-save");
 const workflowTemplateLoad = document.getElementById("workflow-template-load");
 const workflowTemplateAppend = document.getElementById("workflow-template-append");
+const workflowTemplatePin = document.getElementById("workflow-template-pin");
+const workflowTemplateExport = document.getElementById("workflow-template-export");
+const workflowTemplateImport = document.getElementById("workflow-template-import");
 const workflowTemplateDelete = document.getElementById("workflow-template-delete");
 const workflowTemplateClear = document.getElementById("workflow-template-clear");
+const workflowTemplateImportInput = document.getElementById("workflow-template-import-input");
 const workflowJsonStatus = document.getElementById("workflow-json-status");
 const workflowDetailTitle = document.getElementById("workflow-detail-title");
 const workflowDetailBody = document.getElementById("workflow-detail-body");
@@ -4331,6 +4339,17 @@ function fillWorkflowTemplateInputs(meta) {
   if (workflowTemplateCategory) workflowTemplateCategory.value = meta.category || "";
   if (workflowTemplateNote) workflowTemplateNote.value = meta.note || "";
 }
+function downloadJsonFile(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 function renderWorkflowTemplatePanel() {
   if (!workflowTemplateSelect || !workflowTemplateInfo || !workflowTemplateFilter) return;
   const priorFilter = workflowTemplateFilter.value || "all";
@@ -4359,7 +4378,8 @@ function renderWorkflowTemplatePanel() {
     visible.forEach(item => {
       const option = document.createElement("option");
       option.value = item.key;
-      option.textContent = item.category ? `[${item.category}] ${item.name}` : item.name;
+      const prefix = item.pinned ? "★ " : "";
+      option.textContent = item.category ? `${prefix}[${item.category}] ${item.name}` : `${prefix}${item.name}`;
       workflowTemplateSelect.appendChild(option);
     });
     const matched = visible.some(item => item.key === prior);
@@ -4368,9 +4388,12 @@ function renderWorkflowTemplatePanel() {
   const meta = selectedWorkflowTemplateMeta();
   workflowTemplateLoad.disabled = !meta;
   workflowTemplateAppend.disabled = !meta;
+  workflowTemplatePin.disabled = !meta;
+  workflowTemplateExport.disabled = !meta;
   workflowTemplateDelete.disabled = !meta;
   if (workflowTemplateClear) workflowTemplateClear.disabled = false;
   if (!meta) {
+    if (workflowTemplatePin) workflowTemplatePin.textContent = "置顶模板";
     workflowTemplateInfo.textContent = workflowTemplateLibrary.length
       ? "当前分类下没有模板。可以切换筛选或直接输入新模板信息保存。"
       : "把当前工作流保存成自定义模板，后面可以一键载入或追加复用。";
@@ -4378,9 +4401,11 @@ function renderWorkflowTemplatePanel() {
   }
   fillWorkflowTemplateInputs(meta);
   const labels = Array.isArray(meta.labels) && meta.labels.length ? meta.labels.join(" / ") : "未记录步骤摘要";
+  if (workflowTemplatePin) workflowTemplatePin.textContent = meta.pinned ? "取消置顶" : "置顶模板";
+  const pinText = meta.pinned ? "置顶" : "普通";
   const categoryText = meta.category ? `分类：${meta.category}` : "未分类";
   const noteText = meta.note ? ` | 备注：${meta.note}` : "";
-  workflowTemplateInfo.textContent = `${categoryText} | ${meta.step_count || 0} 个步骤 | ${formatWorkflowTemplateSavedAt(meta.saved_at)} | ${labels}${noteText}`;
+  workflowTemplateInfo.textContent = `${pinText} | ${categoryText} | ${meta.step_count || 0} 个步骤 | ${formatWorkflowTemplateSavedAt(meta.saved_at)} | ${labels}${noteText}`;
 }
 async function refreshWorkflowTemplates(silent = false, preferredKey = "") {
   if (!workflowTemplateSelect) return;
@@ -4390,6 +4415,7 @@ async function refreshWorkflowTemplates(silent = false, preferredKey = "") {
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || "读取模板库失败");
     workflowTemplateLibrary = Array.isArray(result.items) ? result.items : [];
+    if (preferredKey && workflowTemplateFilter) workflowTemplateFilter.value = "all";
     renderWorkflowTemplatePanel();
     if (preferredKey && workflowTemplateLibrary.some(item => item.key === preferredKey)) {
       workflowTemplateSelect.value = preferredKey;
@@ -4437,6 +4463,70 @@ async function saveCurrentWorkflowTemplate() {
     log(`工作流模板保存失败：${error.message}`);
   } finally {
     workflowTemplateSave.disabled = false;
+  }
+}
+async function toggleWorkflowTemplatePin() {
+  const meta = selectedWorkflowTemplateMeta();
+  if (!meta) {
+    workflowStatus("请先选择一个已保存的工作流模板。");
+    return;
+  }
+  workflowTemplatePin.disabled = true;
+  try {
+    const form = new FormData();
+    form.append("name", meta.key);
+    form.append("pinned", meta.pinned ? "0" : "1");
+    const response = await fetch("/workflow-template-pin", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "模板置顶操作失败");
+    await refreshWorkflowTemplates(true, result.template?.key || meta.key);
+    workflowStatus(`已${result.template?.pinned ? "置顶" : "取消置顶"}工作流模板：${result.template?.name || meta.name}。`);
+  } catch (error) {
+    workflowStatus(`模板置顶操作失败：${error.message}`);
+    log(`工作流模板置顶操作失败：${error.message}`);
+  } finally {
+    workflowTemplatePin.disabled = false;
+  }
+}
+async function exportSelectedWorkflowTemplate() {
+  const meta = selectedWorkflowTemplateMeta();
+  if (!meta) {
+    workflowStatus("请先选择一个已保存的工作流模板。");
+    return;
+  }
+  workflowTemplateExport.disabled = true;
+  try {
+    const form = new FormData();
+    form.append("name", meta.key);
+    const response = await fetch("/workflow-template-export", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "导出模板失败");
+    const filename = `TexCat_template_${result.template?.key || meta.key}.json`;
+    downloadJsonFile(filename, result.template);
+    workflowStatus(`已导出工作流模板：${result.template?.name || meta.name}。`);
+  } catch (error) {
+    workflowStatus(`导出模板失败：${error.message}`);
+    log(`工作流模板导出失败：${error.message}`);
+  } finally {
+    workflowTemplateExport.disabled = false;
+  }
+}
+async function importWorkflowTemplateFile(file) {
+  if (!file) return;
+  workflowTemplateImport.disabled = true;
+  try {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const response = await fetch("/workflow-template-import", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "导入模板失败");
+    await refreshWorkflowTemplates(true, result.template?.key || "");
+    workflowStatus(`已导入工作流模板：${result.template?.name || file.name}${result.renamed ? "（名称已自动避让）" : ""}。`);
+  } catch (error) {
+    workflowStatus(`导入模板失败：${error.message}`);
+    log(`工作流模板导入失败：${error.message}`);
+  } finally {
+    workflowTemplateImport.disabled = false;
   }
 }
 async function applyWorkflowTemplate(mode = "replace") {
@@ -6236,11 +6326,18 @@ workflowTemplateRefresh.onclick = () => refreshWorkflowTemplates(false, workflow
 workflowTemplateSave.onclick = saveCurrentWorkflowTemplate;
 workflowTemplateLoad.onclick = () => applyWorkflowTemplate("replace");
 workflowTemplateAppend.onclick = () => applyWorkflowTemplate("append");
+workflowTemplatePin.onclick = toggleWorkflowTemplatePin;
+workflowTemplateExport.onclick = exportSelectedWorkflowTemplate;
+workflowTemplateImport.onclick = () => workflowTemplateImportInput.click();
 workflowTemplateDelete.onclick = deleteSelectedWorkflowTemplate;
 workflowTemplateClear.onclick = () => {
   clearWorkflowTemplateInputs();
   workflowStatus("已清空模板输入，可直接填写新的模板信息。");
   workflowTemplateName.focus();
+};
+workflowTemplateImportInput.onchange = () => {
+  importWorkflowTemplateFile(workflowTemplateImportInput.files && workflowTemplateImportInput.files[0]);
+  workflowTemplateImportInput.value = "";
 };
 workflowStepPreviewRun.onclick = previewWorkflowStepResult;
 workflowPreviewRun.onclick = previewWorkflowPlan;
@@ -6558,6 +6655,21 @@ def workflow_template_path(value: str) -> Path:
     return WORKFLOW_TEMPLATE_DIR / f"{workflow_template_key(value)}.json"
 
 
+def workflow_template_name(value: str, fallback: str = "workflow_template") -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    return text or fallback
+
+
+def unique_workflow_template_name(value: str, fallback: str = "导入模板") -> str:
+    base_name = workflow_template_name(value, fallback)
+    candidate = base_name
+    index = 2
+    while workflow_template_path(candidate).exists():
+        candidate = f"{base_name} {index}"
+        index += 1
+    return candidate
+
+
 def workflow_template_steps(data: dict[str, object]) -> list[dict[str, object]]:
     steps = workflow_steps_from_payload(data)
     if not steps:
@@ -6572,6 +6684,7 @@ def workflow_template_meta(path: Path, data: dict[str, object] | None = None) ->
     if not isinstance(raw, dict):
         raise ValueError("工作流模板格式无效")
     step_count = len(workflow_steps_from_payload(raw))
+    pinned = raw.get("pinned", False) is True
     category = re.sub(r"\s+", " ", str(raw.get("category", "") or "").strip())
     note = re.sub(r"\s+", " ", str(raw.get("note", "") or "").strip())
     steps = raw.get("steps", [])
@@ -6587,6 +6700,7 @@ def workflow_template_meta(path: Path, data: dict[str, object] | None = None) ->
     return {
         "key": path.stem,
         "name": str(raw.get("name", "")).strip() or path.stem,
+        "pinned": pinned,
         "category": category,
         "note": note,
         "step_count": step_count,
@@ -6599,16 +6713,23 @@ def workflow_template_meta(path: Path, data: dict[str, object] | None = None) ->
 def list_workflow_templates() -> list[dict[str, object]]:
     ensure_default_dirs()
     items: list[dict[str, object]] = []
-    for path in sorted(WORKFLOW_TEMPLATE_DIR.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+    for path in WORKFLOW_TEMPLATE_DIR.glob("*.json"):
         try:
             items.append(workflow_template_meta(path))
         except Exception:
             continue
+    items.sort(key=lambda item: (0 if item.get("pinned") else 1, str(item.get("category", "")).lower(), str(item.get("name", "")).lower()))
     return items
 
 
-def save_workflow_template(name: str, payload: dict[str, object], category: str = "", note: str = "") -> tuple[dict[str, object], bool]:
-    display_name = re.sub(r"\s+", " ", str(name or "").strip())
+def save_workflow_template(
+    name: str,
+    payload: dict[str, object],
+    category: str = "",
+    note: str = "",
+    pinned: bool | None = None,
+) -> tuple[dict[str, object], bool]:
+    display_name = workflow_template_name(name, "")
     if not display_name:
         raise ValueError("模板名称不能为空")
     display_category = re.sub(r"\s+", " ", str(category or "").strip())
@@ -6619,11 +6740,19 @@ def save_workflow_template(name: str, payload: dict[str, object], category: str 
     workflow_template_steps({"steps": steps})
     path = workflow_template_path(display_name)
     existed = path.exists()
+    resolved_pinned = bool(pinned)
+    if pinned is None and existed:
+        try:
+            existing = load_workflow_template(display_name)
+            resolved_pinned = existing.get("pinned", False) is True
+        except Exception:
+            resolved_pinned = False
     template_payload = {
         "version": 1,
         "app": "TexCat",
         "kind": "workflow-template",
         "name": display_name,
+        "pinned": resolved_pinned,
         "category": display_category,
         "note": display_note,
         "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -6645,10 +6774,56 @@ def load_workflow_template(value: str) -> dict[str, object]:
         raise ValueError("工作流模板格式无效")
     workflow_template_steps(data)
     data["name"] = str(data.get("name", "")).strip() or path.stem
+    data["pinned"] = data.get("pinned", False) is True
     data["category"] = re.sub(r"\s+", " ", str(data.get("category", "") or "").strip())
     data["note"] = re.sub(r"\s+", " ", str(data.get("note", "") or "").strip())
     data["key"] = path.stem
     return data
+
+
+def export_workflow_template(value: str) -> dict[str, object]:
+    data = load_workflow_template(value)
+    return {
+        "version": 1,
+        "app": "TexCat",
+        "kind": "workflow-template",
+        "name": data["name"],
+        "key": data["key"],
+        "pinned": data.get("pinned", False) is True,
+        "category": data.get("category", ""),
+        "note": data.get("note", ""),
+        "saved_at": data.get("saved_at", ""),
+        "steps": data.get("steps", []),
+    }
+
+
+def import_workflow_template_data(data: dict[str, object], fallback_name: str = "导入模板") -> tuple[dict[str, object], bool]:
+    if not isinstance(data, dict):
+        raise ValueError("导入模板文件格式无效")
+    workflow_template_steps(data)
+    requested_name = workflow_template_name(str(data.get("name", "")).strip(), workflow_template_name(fallback_name, "导入模板"))
+    display_name = unique_workflow_template_name(requested_name, "导入模板")
+    renamed = workflow_template_key(display_name) != workflow_template_key(requested_name)
+    template, _updated = save_workflow_template(
+        display_name,
+        {"steps": data.get("steps", [])},
+        str(data.get("category", "") or ""),
+        str(data.get("note", "") or ""),
+        data.get("pinned", False) is True,
+    )
+    return template, renamed
+
+
+def set_workflow_template_pinned(value: str, pinned: bool) -> dict[str, object]:
+    data = load_workflow_template(value)
+    template, _updated = save_workflow_template(
+        str(data.get("name", "")),
+        {"steps": data.get("steps", [])},
+        str(data.get("category", "") or ""),
+        str(data.get("note", "") or ""),
+        bool(pinned),
+    )
+    return template
 
 
 def delete_workflow_template(value: str) -> dict[str, object]:
@@ -9358,6 +9533,33 @@ class ToolboxHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
+        if path == "/workflow-template-export":
+            mark_browser_alive(self.server)
+            try:
+                self.handle_export_workflow_template()
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if path == "/workflow-template-import":
+            mark_browser_alive(self.server)
+            try:
+                self.handle_import_workflow_template()
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if path == "/workflow-template-pin":
+            mark_browser_alive(self.server)
+            try:
+                self.handle_pin_workflow_template()
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if path == "/workflow-template-delete":
             mark_browser_alive(self.server)
             try:
@@ -9514,6 +9716,32 @@ class ToolboxHandler(BaseHTTPRequestHandler):
     def handle_load_workflow_template(self) -> None:
         form = self.parse_form()
         template = load_workflow_template(str(form.getfirst("name", "")))
+        self.send_json(200, {"ok": True, "template": template})
+
+    def handle_export_workflow_template(self) -> None:
+        form = self.parse_form()
+        template = export_workflow_template(str(form.getfirst("name", "")))
+        self.send_json(200, {"ok": True, "template": template})
+
+    def handle_import_workflow_template(self) -> None:
+        form = self.parse_form()
+        field = uploaded_file_field(form, "file")
+        if field is None:
+            raise ValueError("缺少模板文件")
+        try:
+            raw = field.file.read()
+            data = json.loads(raw.decode("utf-8"))
+        except UnicodeDecodeError as exc:
+            raise ValueError("模板文件编码无效，请使用 UTF-8 JSON") from exc
+        except json.JSONDecodeError as exc:
+            raise ValueError("模板文件不是有效的 JSON") from exc
+        template, renamed = import_workflow_template_data(data, Path(field.filename).stem or "导入模板")
+        self.send_json(200, {"ok": True, "template": template, "renamed": renamed})
+
+    def handle_pin_workflow_template(self) -> None:
+        form = self.parse_form()
+        pinned = str(form.getfirst("pinned", "1")).strip() in ("1", "true", "yes", "on")
+        template = set_workflow_template_pinned(str(form.getfirst("name", "")), pinned)
         self.send_json(200, {"ok": True, "template": template})
 
     def handle_delete_workflow_template(self) -> None:
