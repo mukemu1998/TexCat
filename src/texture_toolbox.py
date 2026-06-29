@@ -337,6 +337,30 @@ h1 { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: 0; }
   margin-bottom: 12px;
 }
 .workflow-step-toolbar select { min-width: 190px; }
+.workflow-preset-box {
+  margin-bottom: 14px;
+}
+.workflow-preset-info {
+  display: grid;
+  gap: 8px;
+}
+.workflow-preset-name {
+  font-weight: 650;
+}
+.workflow-preset-steps {
+  display: grid;
+  gap: 6px;
+}
+.workflow-preset-step {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.workflow-preset-step span:first-child {
+  color: var(--muted);
+}
 .workflow-step-card {
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
@@ -1950,9 +1974,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     <div class="section-head">
       <div>
         <strong>工作流模式 Beta</strong>
-        <div class="muted">当前可真实执行：图片裁切、法线/黑白调整、通道拆分、通道合并、缩放、格式与压缩、命名规则；当前步骤预览继续在 Beta 中完善。</div>
+        <div class="muted">当前可真实执行：图片裁切、法线/黑白调整、通道拆分、通道合并、缩放、格式与压缩、命名规则；并已加入第一批内置工作流预设。</div>
       </div>
-      <span class="workflow-badge">阶段 8 / 当前步骤预览 Beta</span>
+      <span class="workflow-badge">阶段 9 / 内置预设 Beta</span>
     </div>
     <div class="workflow-grid">
       <div class="workflow-column">
@@ -1964,6 +1988,29 @@ button:disabled { opacity: .55; cursor: not-allowed; }
       </div>
       <div class="workflow-column">
         <div class="workflow-column-title">处理步骤</div>
+        <div class="workflow-param-card workflow-preset-box">
+          <div class="workflow-param-grid">
+            <label>内置预设
+              <select id="workflow-preset-select">
+                <option value="resize_pyramid">多级尺寸输出</option>
+                <option value="orm_pack">ORM 通道打包</option>
+                <option value="normal_adjust">法线批量调整</option>
+                <option value="mask_adjust">黑白遮罩调整</option>
+                <option value="batch_crop">多图同位置裁切</option>
+                <option value="split_merge_pack">通道拆分后重组</option>
+              </select>
+            </label>
+          </div>
+          <div id="workflow-preset-info" class="workflow-preset-info">
+            <div id="workflow-preset-name" class="workflow-preset-name">多级尺寸输出</div>
+            <div id="workflow-preset-summary" class="muted">2K / 1K / 512 / 256 多级贴图链，默认保留原格式并自动添加尺寸后缀。</div>
+            <div id="workflow-preset-steps" class="workflow-preset-steps"></div>
+          </div>
+          <div class="workflow-actions">
+            <button id="workflow-apply-preset" type="button">套用预设</button>
+            <button id="workflow-append-preset" class="secondary" type="button">追加预设</button>
+          </div>
+        </div>
         <div class="workflow-step-toolbar">
           <label>步骤类型
             <select id="workflow-step-type">
@@ -2143,6 +2190,12 @@ const workflowModeView = document.getElementById("workflow-mode-view");
 const workflowResourceSummary = document.getElementById("workflow-resource-summary");
 const workflowResourceList = document.getElementById("workflow-resource-list");
 const workflowOutputSummary = document.getElementById("workflow-output-summary");
+const workflowPresetSelect = document.getElementById("workflow-preset-select");
+const workflowPresetName = document.getElementById("workflow-preset-name");
+const workflowPresetSummary = document.getElementById("workflow-preset-summary");
+const workflowPresetSteps = document.getElementById("workflow-preset-steps");
+const workflowApplyPreset = document.getElementById("workflow-apply-preset");
+const workflowAppendPreset = document.getElementById("workflow-append-preset");
 const workflowStepType = document.getElementById("workflow-step-type");
 const workflowAddStep = document.getElementById("workflow-add-step");
 const workflowStepList = document.getElementById("workflow-step-list");
@@ -2656,6 +2709,111 @@ const workflowProfileLabels = {
   data: "data - 法线/遮罩/数据贴图",
   pixel: "pixel - 像素风/硬边",
 };
+const workflowPresetDefinitions = {
+  resize_pyramid: {
+    label: "多级尺寸输出",
+    summary: "2K / 1K / 512 / 256 多级贴图链，默认保留原格式并自动添加尺寸后缀。",
+    build: (previewOnly = false) => {
+      const current = currentResizeWorkflowOptions();
+      return [
+        workflowPresetStep("resize", {
+          ...current,
+          sizes: [2048, 1024, 512, 256],
+          custom: "",
+          preserve: true,
+          append_size_suffix: true,
+          format: current.format || "keep",
+        }, previewOnly),
+      ];
+    },
+  },
+  orm_pack: {
+    label: "ORM 通道打包",
+    summary: "读取当前通道合并模块设置，生成单张 ORM 打包图，并在命名后缀追加 _ORM。",
+    build: (previewOnly = false) => {
+      const merge = currentMergeWorkflowOptions();
+      const outputName = (merge.output_name || "").trim();
+      return [
+        workflowPresetStep("merge", {
+          ...merge,
+          output_name: outputName && outputName !== "merged_rgba" ? outputName : "packed",
+        }, previewOnly),
+        workflowPresetStep("rename", workflowRenameStepsOptions([{ op: "suffix", suffix: "_ORM" }]), previewOnly),
+      ];
+    },
+  },
+  normal_adjust: {
+    label: "法线批量调整",
+    summary: "复用当前法线模块参数，强制按法线模式生成批量调整链。",
+    build: (previewOnly = false) => {
+      const current = currentNormalWorkflowOptions();
+      const defaults = workflowDefaultOptions("normal");
+      return [
+        workflowPresetStep("normal", {
+          ...defaults,
+          ...current,
+          strength_mode: "normal",
+          strength: current.strength_mode === "normal" ? current.strength : defaults.strength,
+          normal_mode: current.normal_mode || defaults.normal_mode,
+          format: current.format || "keep",
+        }, previewOnly),
+      ];
+    },
+  },
+  mask_adjust: {
+    label: "黑白遮罩调整",
+    summary: "复用当前黑白 / 粗糙度滑杆，按灰度遮罩调整链处理 Mask / Roughness / Metallic。",
+    build: (previewOnly = false) => {
+      const current = currentNormalWorkflowOptions();
+      const defaults = workflowDefaultOptions("normal");
+      return [
+        workflowPresetStep("normal", {
+          ...defaults,
+          ...current,
+          strength_mode: "roughness",
+          strength: current.strength_mode === "roughness" ? current.strength : 1.0,
+          contrast: current.strength_mode === "roughness" ? current.contrast : 1.0,
+          bias: current.strength_mode === "roughness" ? current.bias : 0.0,
+          black: current.strength_mode === "roughness" ? current.black : 0.0,
+          white: current.strength_mode === "roughness" ? current.white : 1.0,
+          gamma: current.strength_mode === "roughness" ? current.gamma : 1.0,
+          curve: current.strength_mode === "roughness" ? current.curve : 0.0,
+          invert: current.strength_mode === "roughness" ? current.invert : false,
+          format: current.format || "keep",
+        }, previewOnly),
+      ];
+    },
+  },
+  batch_crop: {
+    label: "多图同位置裁切",
+    summary: "复用当前裁切框并强制切到多图同位置模式，适合同尺寸贴图批量裁切同一区域。",
+    build: (previewOnly = false) => {
+      const current = currentCropWorkflowOptions();
+      return [
+        workflowPresetStep("crop", {
+          ...current,
+          mode: "batch",
+        }, previewOnly),
+      ];
+    },
+  },
+  split_merge_pack: {
+    label: "通道拆分后重组",
+    summary: "先拆出上游单通道，再在后续合并步骤里重新打包，适合做流程验证或重建通道贴图。",
+    build: (previewOnly = false) => {
+      const split = currentSplitWorkflowOptions();
+      const merge = currentMergeWorkflowOptions();
+      const outputName = (merge.output_name || "").trim();
+      return [
+        workflowPresetStep("split", split, previewOnly),
+        workflowPresetStep("merge", {
+          ...merge,
+          output_name: outputName && outputName !== "merged_rgba" ? outputName : "repacked",
+        }, previewOnly),
+      ];
+    },
+  },
+};
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({
     "&": "&amp;",
@@ -2937,6 +3095,28 @@ function currentRenameWorkflowOptions() {
     steps: getRenameSteps(),
   });
 }
+function workflowRenameStepsOptions(steps, format = "keep") {
+  return workflowMergeOptions("rename", {
+    format,
+    steps: Array.isArray(steps) && steps.length ? steps : [workflowDefaultRenameStep()],
+  });
+}
+function workflowPresetStep(type, options, previewOnly = false) {
+  const definition = workflowStepDefinition(type);
+  const step = previewOnly
+    ? {
+        id: "",
+        type,
+        enabled: true,
+        label: definition.label,
+        summary: definition.summary,
+        options: workflowDefaultOptions(type),
+      }
+    : createWorkflowStep(type);
+  step.options = workflowMergeOptions(type, options);
+  step.summary = workflowStepSummary(step);
+  return step;
+}
 function workflowInitialOptions(type) {
   try {
     if (type === "resize") return currentResizeWorkflowOptions();
@@ -3025,6 +3205,66 @@ function workflowStepSummary(step) {
     return `${options.steps.length} 个命名步骤，${workflowFormatLabels[options.format] || options.format.toUpperCase()}`;
   }
   return step.summary || definition.summary;
+}
+function workflowPresetKey() {
+  return workflowPresetSelect?.value || Object.keys(workflowPresetDefinitions)[0];
+}
+function workflowPresetDefinition(key) {
+  return workflowPresetDefinitions[key] || workflowPresetDefinitions.resize_pyramid;
+}
+function renderWorkflowPresetPanel() {
+  if (!workflowPresetSelect || !workflowPresetName || !workflowPresetSummary || !workflowPresetSteps) return;
+  const preset = workflowPresetDefinition(workflowPresetKey());
+  workflowPresetName.textContent = preset.label;
+  workflowPresetSummary.textContent = preset.summary;
+  workflowPresetSteps.innerHTML = "";
+  try {
+    const steps = preset.build(true);
+    steps.forEach((step, index) => {
+      const row = document.createElement("div");
+      row.className = "workflow-preset-step";
+      const name = document.createElement("span");
+      name.textContent = `步骤 ${index + 1}：${step.label}`;
+      const summary = document.createElement("strong");
+      summary.textContent = workflowStepSummary(step);
+      row.appendChild(name);
+      row.appendChild(summary);
+      workflowPresetSteps.appendChild(row);
+    });
+  } catch (error) {
+    const row = document.createElement("div");
+    row.className = "workflow-preset-step";
+    const name = document.createElement("span");
+    name.textContent = "预设读取失败";
+    const summary = document.createElement("strong");
+    summary.textContent = error.message || "请检查当前快捷模块设置";
+    row.appendChild(name);
+    row.appendChild(summary);
+    workflowPresetSteps.appendChild(row);
+  }
+}
+function applyWorkflowPreset(mode = "replace") {
+  const preset = workflowPresetDefinition(workflowPresetKey());
+  try {
+    const steps = preset.build(false);
+    if (!Array.isArray(steps) || !steps.length) throw new Error("预设没有生成任何步骤");
+    const priorCount = workflowSteps.length;
+    if (mode === "append") {
+      workflowSteps.push(...steps);
+    } else {
+      workflowSteps = steps;
+    }
+    workflowSelectedStepId = steps[0].id;
+    workflowStatus(
+      mode === "append"
+        ? `已追加预设：${preset.label}，新增 ${steps.length} 个步骤。`
+        : `已套用预设：${preset.label}，${priorCount ? `替换原有 ${priorCount} 个步骤并` : ""}生成 ${steps.length} 个步骤。`
+    );
+    renderWorkflowShell();
+  } catch (error) {
+    workflowStatus(`预设套用失败：${error.message}`);
+    log(`工作流预设失败：${error.message}`);
+  }
 }
 function selectedWorkflowStep() {
   return workflowSteps.find(step => step.id === workflowSelectedStepId) || null;
@@ -4138,6 +4378,7 @@ function renderWorkflowShell() {
   const selected = selectedWorkflowStep();
   if (workflowStepPreviewRun) workflowStepPreviewRun.disabled = !selected || !items.length;
   resetWorkflowStepPreview(workflowStepPreviewPrompt(selected));
+  renderWorkflowPresetPanel();
   updateWorkflowSummary();
   renderWorkflowSteps();
   renderWorkflowDetail();
@@ -5651,6 +5892,9 @@ setInterval(heartbeat, 5000);
 modeButtons.forEach(button => {
   button.onclick = () => setAppMode(button.dataset.mode || "quick");
 });
+workflowPresetSelect.onchange = renderWorkflowPresetPanel;
+workflowApplyPreset.onclick = () => applyWorkflowPreset("replace");
+workflowAppendPreset.onclick = () => applyWorkflowPreset("append");
 workflowAddStep.onclick = () => {
   const step = createWorkflowStep(workflowStepType.value);
   workflowSteps.push(step);
