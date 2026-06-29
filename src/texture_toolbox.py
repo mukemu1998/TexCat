@@ -1930,9 +1930,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     <div class="section-head">
       <div>
         <strong>工作流模式 Beta</strong>
-        <div class="muted">第一阶段只搭建界面壳和流程位置，不执行真实处理；快速工具模式保持可用。</div>
+        <div class="muted">当前可真实执行：缩放、格式与压缩、命名规则；其他步骤继续在 Beta 中迭代接入。</div>
       </div>
-      <span class="workflow-badge">阶段 3 / 参数接入 Beta</span>
+      <span class="workflow-badge">阶段 4 / 首条执行链 Beta</span>
     </div>
     <div class="workflow-grid">
       <div class="workflow-column">
@@ -1964,7 +1964,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <button id="workflow-load" class="secondary" type="button">载入工作流 JSON</button>
           <input id="workflow-load-input" type="file" accept=".json,application/json" hidden>
         </div>
-        <div id="workflow-json-status" class="workflow-json-status muted">当前步骤会保存真实参数配置，暂不执行完整工作流处理。</div>
+        <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：缩放 / 格式与压缩 / 命名规则；其余步骤先保留结构和预览。</div>
       </div>
       <div class="workflow-column">
         <div class="workflow-column-title">参数与输出摘要</div>
@@ -1986,7 +1986,14 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <span id="workflow-preview-info" class="muted">预览只计算路径、命名和冲突，不会写出图片。</span>
         </div>
         <div id="workflow-preview-list" class="preview-table workflow-preview-table">尚未预览。</div>
-        <div class="notice" style="margin-top:14px;">工作流 Beta 暂不写入输出目录，也不会修改源文件。当前阶段只维护步骤结构、参数 JSON 和输出预览。</div>
+        <div class="workflow-actions" style="margin-top:14px;">
+          <button id="workflow-run" type="button">执行工作流并导出</button>
+        </div>
+        <div id="workflow-run-progress-wrap" class="run-progress-wrap" hidden>
+          <progress id="workflow-run-progress" max="100" value="0"></progress>
+          <div id="workflow-run-status" class="run-status muted">等待执行。</div>
+        </div>
+        <div class="notice" style="margin-top:14px;">工作流 Beta 当前可真实导出：缩放、格式与压缩、命名规则。裁切、法线/黑白调整、通道拆分、通道合并会在后续阶段继续接入。</div>
       </div>
     </div>
   </section>
@@ -2125,6 +2132,10 @@ const workflowSummaryExport = document.getElementById("workflow-summary-export")
 const workflowPreviewRun = document.getElementById("workflow-preview-run");
 const workflowPreviewInfo = document.getElementById("workflow-preview-info");
 const workflowPreviewList = document.getElementById("workflow-preview-list");
+const workflowRunButton = document.getElementById("workflow-run");
+const workflowRunProgressWrap = document.getElementById("workflow-run-progress-wrap");
+const workflowRunProgress = document.getElementById("workflow-run-progress");
+const workflowRunStatus = document.getElementById("workflow-run-status");
 const drop = document.getElementById("drop");
 const picker = document.getElementById("picker");
 const filesBox = document.getElementById("files");
@@ -2256,6 +2267,7 @@ const settingsStatus = document.getElementById("settings-status");
 let files = [];
 let folderFiles = [];
 let currentTool = "resize";
+let currentAppMode = "quick";
 let customOutputValue = outputBox.dataset.default;
 let askOutputValue = outputBox.dataset.default;
 let mergePreviewTimer = null;
@@ -4381,6 +4393,7 @@ function updateInputMode() {
 
 function setAppMode(mode) {
   const workflow = mode === "workflow";
+  currentAppMode = workflow ? "workflow" : "quick";
   quickModeView.hidden = workflow;
   workflowModeView.hidden = !workflow;
   quickModeView.classList.toggle("active", !workflow);
@@ -4821,6 +4834,11 @@ function appendCommon(form) {
     for (const file of files) form.append("files", file, file.webkitRelativePath || file.name);
   }
 }
+
+function appendWorkflowOptions(form) {
+  form.set("tool", "workflow");
+  form.append("workflow", JSON.stringify(workflowPayload()));
+}
 function appendToolOptions(form) {
   if (currentTool === "resize") {
     const sizes = [...document.querySelectorAll('input[name="size"]:checked')].map(x => x.value);
@@ -4894,6 +4912,13 @@ function setRunProgress(value, text, kind = "") {
   runStatus.className = `run-status muted${kind ? ` ${kind}` : ""}`;
 }
 
+function setWorkflowRunProgress(value, text, kind = "") {
+  workflowRunProgressWrap.hidden = false;
+  workflowRunProgress.value = Math.max(0, Math.min(100, value));
+  workflowRunStatus.textContent = text;
+  workflowRunStatus.className = `run-status muted${kind ? ` ${kind}` : ""}`;
+}
+
 function conflictLabel(item) {
   if (typeof item === "string") return item;
   const suffix = item.reason ? ` (${item.reason})` : "";
@@ -4925,6 +4950,71 @@ async function checkExportConflicts(form) {
   if (!response.ok || !result.ok) throw new Error(result.error || "导出检查失败");
   return result;
 }
+
+workflowRunButton.onclick = async () => {
+  let count = 0;
+  if (inputMode() === "folder") {
+    const ok = await refreshFolderFiles(false);
+    count = folderFiles.length;
+    if (!ok || !count) { workflowStatus("请确认自定义输入目录里有支持格式图片。"); return; }
+  } else {
+    count = files.length;
+    if (!count) { workflowStatus("请先拖入或选择图片。"); return; }
+  }
+  if (!workflowSteps.length) {
+    workflowStatus("请先添加至少一个工作流步骤。");
+    return;
+  }
+  workflowRunButton.disabled = true;
+  setWorkflowRunProgress(4, "正在准备工作流导出...");
+  log(`开始执行工作流，文件数 ${count}...`);
+  try {
+    const selectedOutput = await chooseOutputDirectoryIfNeeded();
+    if (!selectedOutput) {
+      setWorkflowRunProgress(100, "已取消导出。", "warn");
+      log("已取消工作流导出：没有选择输出文件夹。");
+      return;
+    }
+    const form = new FormData();
+    appendCommon(form);
+    appendWorkflowOptions(form);
+    setWorkflowRunProgress(18, "正在检查工作流输出冲突...");
+    form.set("conflict_action", "cancel");
+    const preflight = await checkExportConflicts(form);
+    if (preflight.conflicts && preflight.conflicts.length) {
+      setWorkflowRunProgress(30, `发现 ${preflight.conflicts.length} 个同名目标文件，等待选择处理方式。`, "warn");
+      const action = await chooseConflictAction(preflight.conflicts);
+      if (action === "cancel") {
+        setWorkflowRunProgress(100, "已取消导出。", "warn");
+        log("已取消工作流导出：目标位置存在同名文件。");
+        return;
+      }
+      form.set("conflict_action", action);
+      if (action === "suffix") {
+        setWorkflowRunProgress(38, "正在检查 _TC 后缀目标名...");
+        const suffixCheck = await checkExportConflicts(form);
+        if (suffixCheck.conflicts && suffixCheck.conflicts.length) {
+          const names = suffixCheck.conflicts.slice(0, 6).map(conflictLabel).join("、");
+          throw new Error(`加 _TC 后仍有同名文件：${names}`);
+        }
+      }
+    }
+    setWorkflowRunProgress(64, "正在执行工作流并导出贴图...");
+    const response = await fetch("/process", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "工作流处理失败");
+    log(result.log.join("\n"));
+    log(`工作流完成，输出目录：${result.output}`);
+    setWorkflowRunProgress(100, `工作流导出完成：${result.output}`, "ok");
+    workflowStatus(`工作流执行完成：${result.output}`);
+  } catch (error) {
+    log(`工作流失败：${error.message}`);
+    setWorkflowRunProgress(100, `工作流导出失败：${error.message}`, "error");
+    workflowStatus(`工作流执行失败：${error.message}`);
+  } finally {
+    workflowRunButton.disabled = false;
+  }
+};
 
 runButton.onclick = async () => {
   let count = 0;
@@ -6505,6 +6595,15 @@ def normalized_output_format(value: object, allow_keep: bool = True, fallback: s
     return text if text in OUTPUT_FORMATS else fallback
 
 
+WORKFLOW_PREVIEW_UNSUPPORTED_LABELS = {
+    "crop": "图片裁切",
+    "normal": "法线/黑白调整",
+    "pbr": "PBR辅助生成",
+    "split": "通道拆分",
+    "merge": "通道合并/打包",
+}
+
+
 def workflow_payload_from_form(form: cgi.FieldStorage) -> dict[str, object]:
     try:
         payload = json.loads(form.getfirst("workflow", "{}"))
@@ -6531,6 +6630,33 @@ def workflow_active_steps(payload: dict[str, object]) -> list[dict[str, object]]
     return steps
 
 
+def workflow_source_items(paths: list[Path]) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for source_index, source in enumerate(paths, start=1):
+        with Image.open(source) as opened:
+            image = ImageOps.exif_transpose(opened)
+            texture_type, _detected_token = detect_texture_type(source.stem, True)
+            items.append(
+                {
+                    "source_path": source,
+                    "source_index": source_index,
+                    "source": source.name,
+                    "stem": source.stem,
+                    "ext": source.suffix.lstrip(".").lower(),
+                    "size": image.size,
+                    "size_label": f"{image.size[0]}x{image.size[1]}",
+                    "texture_type": texture_type,
+                    "notes": [],
+                    "resize_applied": False,
+                    "resize_profile": "detail",
+                    "export_applied": False,
+                    "quality": 95,
+                    "lossless": True,
+                }
+            )
+    return items
+
+
 def workflow_resize_sizes(options: dict[str, object]) -> list[int]:
     values: list[str] = []
     raw_sizes = options.get("sizes", [])
@@ -6550,6 +6676,49 @@ def workflow_resize_sizes(options: dict[str, object]) -> list[int]:
             seen.add(parsed)
             sizes.append(parsed)
     return sizes
+
+
+def workflow_resize_items(items: list[dict[str, object]], options: dict[str, object]) -> list[dict[str, object]]:
+    sizes = workflow_resize_sizes(options)
+    if not sizes:
+        raise ValueError("工作流缩放步骤未选择目标尺寸")
+    preserve = options.get("preserve", True) is not False
+    append_size_suffix = options.get("append_size_suffix", True) is not False
+    output_format = normalized_output_format(options.get("format", "keep"), allow_keep=True, fallback="keep")
+    profile_key = str(options.get("profile", "detail")).strip().lower()
+    if profile_key not in core.PROFILES:
+        profile_key = "detail"
+
+    resized_items: list[dict[str, object]] = []
+    for item in items:
+        original_size = item.get("size", (1, 1))
+        if not isinstance(original_size, tuple):
+            original_size = (1, 1)
+        for size in sizes:
+            dimensions = core.target_dimensions(original_size, int(size), preserve)
+            next_item = dict(item)
+            next_item["size"] = dimensions
+            next_item["size_label"] = f"{dimensions[0]}x{dimensions[1]}"
+            next_item["resize_applied"] = True
+            next_item["resize_profile"] = profile_key
+            next_item["stem"] = f"{item['stem']}_{dimensions[0]}x{dimensions[1]}" if append_size_suffix else str(item["stem"])
+            if output_format != "keep":
+                next_item["ext"] = output_format
+            next_item["notes"] = [*item.get("notes", []), f"缩放 {dimensions[0]}x{dimensions[1]}"]
+            resized_items.append(next_item)
+    return resized_items
+
+
+def workflow_apply_export_step(items: list[dict[str, object]], options: dict[str, object]) -> None:
+    output_format = normalized_output_format(options.get("format", "png"), allow_keep=False, fallback="png")
+    quality = int(clamp_float(float(options.get("quality", 95)), 80.0, 100.0))
+    lossless = options.get("lossless", True) is not False
+    for item in items:
+        item["ext"] = output_format
+        item["export_applied"] = True
+        item["quality"] = quality
+        item["lossless"] = lossless
+        item["notes"] = [*item.get("notes", []), f"导出 {output_format.upper()}"]
 
 
 def workflow_rename_stem(item: dict[str, object], source_index: int, options: dict[str, object]) -> str:
@@ -6595,87 +6764,49 @@ def workflow_rename_stem(item: dict[str, object], source_index: int, options: di
     return safe_stem(tokens["name"], source.stem or f"texture_{source_index}")
 
 
-def workflow_preview_plan(paths: list[Path], output_dir: Path, form: cgi.FieldStorage, payload: dict[str, object]) -> dict[str, object]:
+def workflow_apply_rename_step(items: list[dict[str, object]], options: dict[str, object]) -> None:
+    output_format = normalized_output_format(options.get("format", "keep"), allow_keep=True, fallback="keep")
+    for item in items:
+        source_index = int(item.get("source_index", 1))
+        item["stem"] = workflow_rename_stem(item, source_index, options)
+        if output_format != "keep":
+            item["ext"] = output_format
+        item["notes"] = [*item.get("notes", []), "命名规则"]
+
+
+def workflow_output_items(
+    paths: list[Path],
+    output_dir: Path,
+    form: cgi.FieldStorage,
+    payload: dict[str, object],
+    *,
+    strict_supported: bool,
+) -> tuple[list[dict[str, object]], list[str]]:
     validate_source_output_mode(form)
     steps = workflow_active_steps(payload)
     if not steps:
         raise ValueError("请先添加至少一个启用的工作流步骤")
 
-    items: list[dict[str, object]] = []
-    for source_index, source in enumerate(paths, start=1):
-        with Image.open(source) as opened:
-            image = ImageOps.exif_transpose(opened)
-            texture_type, _detected_token = detect_texture_type(source.stem, True)
-            items.append(
-                {
-                    "source_path": source,
-                    "source_index": source_index,
-                    "source": source.name,
-                    "stem": source.stem,
-                    "ext": source.suffix.lstrip(".").lower(),
-                    "size": image.size,
-                    "size_label": f"{image.size[0]}x{image.size[1]}",
-                    "texture_type": texture_type,
-                    "notes": [],
-                }
-            )
-
+    items = workflow_source_items(paths)
     warnings_list: list[str] = []
     unsupported_types: list[str] = []
     for step in steps:
         step_type = str(step["type"])
         options = step["options"] if isinstance(step["options"], dict) else {}
         if step_type == "resize":
-            sizes = workflow_resize_sizes(options)
-            if not sizes:
-                raise ValueError("工作流缩放步骤未选择目标尺寸")
-            preserve = options.get("preserve", True) is not False
-            append_size_suffix = options.get("append_size_suffix", True) is not False
-            output_format = normalized_output_format(options.get("format", "keep"), allow_keep=True, fallback="keep")
-            resized_items: list[dict[str, object]] = []
-            for item in items:
-                source = item["source_path"]
-                if not isinstance(source, Path):
-                    continue
-                original_size = item.get("size", (1, 1))
-                if not isinstance(original_size, tuple):
-                    original_size = (1, 1)
-                for size in sizes:
-                    dimensions = core.target_dimensions(original_size, int(size), preserve)
-                    next_item = dict(item)
-                    next_item["size"] = dimensions
-                    next_item["size_label"] = f"{dimensions[0]}x{dimensions[1]}"
-                    next_item["stem"] = f"{item['stem']}_{dimensions[0]}x{dimensions[1]}" if append_size_suffix else str(item["stem"])
-                    if output_format != "keep":
-                        next_item["ext"] = output_format
-                    next_item["notes"] = [*item.get("notes", []), f"缩放 {dimensions[0]}x{dimensions[1]}"]
-                    resized_items.append(next_item)
-            items = resized_items
+            items = workflow_resize_items(items, options)
         elif step_type == "export":
-            output_format = normalized_output_format(options.get("format", "png"), allow_keep=False, fallback="png")
-            for item in items:
-                item["ext"] = output_format
-                item["notes"] = [*item.get("notes", []), f"导出 {output_format.upper()}"]
+            workflow_apply_export_step(items, options)
         elif step_type == "rename":
-            output_format = normalized_output_format(options.get("format", "keep"), allow_keep=True, fallback="keep")
-            for item in items:
-                source_index = int(item.get("source_index", 1))
-                item["stem"] = workflow_rename_stem(item, source_index, options)
-                if output_format != "keep":
-                    item["ext"] = output_format
-                item["notes"] = [*item.get("notes", []), "命名规则"]
+            workflow_apply_rename_step(items, options)
         else:
-            label = {
-                "crop": "图片裁切",
-                "normal": "法线/黑白调整",
-                "pbr": "PBR辅助生成",
-                "split": "通道拆分",
-                "merge": "通道合并/打包",
-            }.get(step_type, step_type)
+            label = WORKFLOW_PREVIEW_UNSUPPORTED_LABELS.get(step_type, step_type)
             if label not in unsupported_types:
                 unsupported_types.append(label)
 
     if unsupported_types:
+        if strict_supported:
+            raise ValueError(f"当前工作流暂不支持执行这些步骤：{'、'.join(unsupported_types)}")
         warnings_list.append(f"{'、'.join(unsupported_types)}暂未参与输出预览")
 
     output_items: list[dict[str, object]] = []
@@ -6684,16 +6815,20 @@ def workflow_preview_plan(paths: list[Path], output_dir: Path, form: cgi.FieldSt
         if not isinstance(source, Path):
             continue
         target_dir = output_dir_for_source(source, output_dir, form)
-        ext = normalized_output_format(item.get("ext", source.suffix.lstrip(".").lower()), allow_keep=False, fallback=source.suffix.lstrip(".").lower() or "png")
+        ext = normalized_output_format(
+            item.get("ext", source.suffix.lstrip(".").lower()),
+            allow_keep=False,
+            fallback=source.suffix.lstrip(".").lower() or "png",
+        )
         destination = target_dir / f"{safe_stem(str(item.get('stem', source.stem)), source.stem)}.{ext}"
         output_items.append(
             {
-                "source": str(item.get("source", source.name)),
+                **item,
                 "target": destination.name,
                 "format": ext.upper(),
                 "path": str(destination),
                 "destination": destination,
-                "notes": " / ".join(str(note) for note in item.get("notes", [])),
+                "notes_text": " / ".join(str(note) for note in item.get("notes", [])),
                 "conflict": False,
                 "reason": "",
             }
@@ -6716,13 +6851,18 @@ def workflow_preview_plan(paths: list[Path], output_dir: Path, form: cgi.FieldSt
         item["conflict"] = bool(reasons)
         item["reason"] = "、".join(reasons)
 
+    return output_items, warnings_list
+
+
+def workflow_preview_plan(paths: list[Path], output_dir: Path, form: cgi.FieldStorage, payload: dict[str, object]) -> dict[str, object]:
+    output_items, warnings_list = workflow_output_items(paths, output_dir, form, payload, strict_supported=False)
     payload_items = [
         {
             "source": str(item["source"]),
             "target": str(item["target"]),
             "format": str(item["format"]),
             "path": str(item["path"]),
-            "notes": str(item["notes"]),
+            "notes": str(item["notes_text"]),
             "conflict": bool(item["conflict"]),
             "reason": str(item["reason"]),
         }
@@ -6736,6 +6876,42 @@ def workflow_preview_plan(paths: list[Path], output_dir: Path, form: cgi.FieldSt
         "warnings": warnings_list,
         "output": output_label_from_form(form, output_dir),
     }
+
+
+def workflow_resized_image(source_image: Image.Image, size: tuple[int, int], profile_key: str) -> Image.Image:
+    profile = core.PROFILES.get(profile_key, core.PROFILES["detail"])
+    if source_image.size == size:
+        return source_image.copy()
+    resized = core.resize_alpha_aware(source_image, size, profile)
+    return core.apply_unsharp_mask(resized, profile.default_sharpen)
+
+
+def save_workflow_item(item: dict[str, object], source: Path, destination: Path, channel_mode: str) -> core.SaveReport:
+    if (
+        not item.get("resize_applied")
+        and not item.get("export_applied")
+        and destination.suffix.lower() == source.suffix.lower()
+        and core.normalize_channel_mode(channel_mode) == "auto"
+    ):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        return inspect_copy_report(source, destination)
+
+    with Image.open(source) as opened:
+        image = ImageOps.exif_transpose(opened)
+        icc_profile = opened.info.get("icc_profile")
+
+    if item.get("resize_applied"):
+        size = item.get("size", image.size)
+        if isinstance(size, tuple) and len(size) == 2:
+            image = workflow_resized_image(image, (int(size[0]), int(size[1])), str(item.get("resize_profile", "detail")))
+
+    if item.get("export_applied"):
+        quality = int(item.get("quality", 95))
+        lossless = bool(item.get("lossless", True))
+        return save_compressed_image(image, source, destination, False, icc_profile, channel_mode, quality, lossless)
+
+    return core.save_image(image, source, destination, False, icc_profile, channel_mode)
 
 
 def planned_output_paths(paths: list[Path], output_dir: Path, form: cgi.FieldStorage, name_suffix: str = "") -> list[Path]:
@@ -6817,6 +6993,11 @@ def planned_output_paths(paths: list[Path], output_dir: Path, form: cgi.FieldSto
     if tool == "rename":
         options = rename_options_from_form(form)
         return [Path(item["destination"]) for item in rename_plan(paths, output_dir, options, name_suffix, source_output_enabled(form))]
+
+    if tool == "workflow":
+        payload = workflow_payload_from_form(form)
+        items, _warnings = workflow_output_items(paths, output_dir, form, payload, strict_supported=True)
+        return [Path(item["destination"]) for item in items]
 
     raise ValueError(f"Unknown tool: {tool}")
 
@@ -7437,6 +7618,18 @@ class ToolboxHandler(BaseHTTPRequestHandler):
                     report = save_renamed_copy(source, destination, fmt, channel_mode)
                     type_note = f" [贴图类型: {item['texture_type']}]" if item["texture_type"] else ""
                     log_lines.append(f"{source.name} -> {report.path.name}{type_note}" + report_summary([report]))
+            elif tool == "workflow":
+                payload = workflow_payload_from_form(form)
+                workflow_items, _warnings = workflow_output_items(paths, output_dir, form, payload, strict_supported=True)
+                for item in workflow_items:
+                    source = item["source_path"]
+                    destination = item["destination"]
+                    if not isinstance(source, Path) or not isinstance(destination, Path):
+                        continue
+                    report = save_workflow_item(item, source, destination, channel_mode)
+                    notes = str(item.get("notes_text", "")).strip()
+                    note_text = f" [工作流: {notes}]" if notes else ""
+                    log_lines.append(f"{source.name} -> {report.path.name}{note_text}" + report_summary([report]))
             else:
                 raise ValueError(f"Unknown tool: {tool}")
         finally:
