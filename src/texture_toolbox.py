@@ -8,6 +8,7 @@ import base64
 import html
 import io
 import json
+import os
 import re
 import shutil
 import sys
@@ -4666,6 +4667,21 @@ function renderWorkflowHistory() {
       applyWorkflowRawSteps(item.workflow?.steps, "append", `执行历史「${item.run_at || "未命名"}」`);
       workflowStatus(`已追加执行历史：${item.run_at || "未命名"}。`);
     };
+    const rerun = document.createElement("button");
+    rerun.className = "secondary";
+    rerun.type = "button";
+    rerun.textContent = "重跑";
+    rerun.disabled = item.rerunnable !== true;
+    rerun.title = item.rerunnable === true ? "按这次执行历史直接重跑" : "当前仅支持重跑自定义输入目录类型的执行历史";
+    rerun.onclick = () => rerunWorkflowHistoryItem(item);
+    const openDir = document.createElement("button");
+    openDir.className = "secondary";
+    openDir.type = "button";
+    openDir.textContent = "打开目录";
+    openDir.disabled = !item.output_path;
+    openDir.onclick = () => openWorkflowHistoryOutput(item);
+    actions.appendChild(rerun);
+    actions.appendChild(openDir);
     actions.appendChild(load);
     actions.appendChild(append);
     head.appendChild(title);
@@ -4674,11 +4690,53 @@ function renderWorkflowHistory() {
     meta.className = "workflow-history-meta";
     const labels = Array.isArray(item.labels) && item.labels.length ? item.labels.join(" / ") : "未记录步骤摘要";
     const outputPath = item.output_path ? ` | 输出路径 ${item.output_path}` : "";
-    meta.textContent = `输入 ${item.input_count || 0} 张 | 输出 ${item.output_count || 0} 项 | 步骤 ${item.step_count || 0}（启用 ${item.active_step_count || 0}） | 冲突策略 ${item.conflict_action || "cancel"} | ${labels}${outputPath}`;
+    const replayText = item.rerunnable === true ? "可直接重跑" : "仅可载入步骤";
+    meta.textContent = `输入 ${item.input_count || 0} 张 | 输出 ${item.output_count || 0} 项 | 步骤 ${item.step_count || 0}（启用 ${item.active_step_count || 0}） | 冲突策略 ${item.conflict_action || "cancel"} | ${replayText} | ${labels}${outputPath}`;
     card.appendChild(head);
     card.appendChild(meta);
     workflowHistoryList.appendChild(card);
   });
+}
+async function rerunWorkflowHistoryItem(item) {
+  if (!item || !item.id) {
+    workflowStatus("缺少可重跑的执行历史。");
+    return;
+  }
+  setWorkflowRunProgress(6, "正在按执行历史重跑工作流...");
+  log(`开始按执行历史重跑：${item.run_at || "未命名"}...`);
+  try {
+    const form = new FormData();
+    form.append("id", item.id);
+    const response = await fetch("/workflow-history-rerun", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "历史重跑失败");
+    log(result.log.join("\n"));
+    log(`历史重跑完成，输出目录：${result.output}`);
+    setWorkflowRunProgress(100, `历史重跑完成：${result.output}`, "ok");
+    workflowStatus(`历史重跑完成：${result.output}`);
+    await refreshWorkflowHistory(true);
+  } catch (error) {
+    log(`历史重跑失败：${error.message}`);
+    setWorkflowRunProgress(100, `历史重跑失败：${error.message}`, "error");
+    workflowStatus(`历史重跑失败：${error.message}`);
+  }
+}
+async function openWorkflowHistoryOutput(item) {
+  if (!item || !item.output_path) {
+    workflowStatus("这条执行历史没有可打开的输出路径。");
+    return;
+  }
+  try {
+    const form = new FormData();
+    form.append("path", item.output_path);
+    const response = await fetch("/open-path", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "打开输出目录失败");
+    workflowStatus(`已打开输出目录：${result.path}`);
+  } catch (error) {
+    workflowStatus(`打开输出目录失败：${error.message}`);
+    log(`打开输出目录失败：${error.message}`);
+  }
 }
 async function refreshWorkflowHistory(silent = false) {
   if (!workflowHistoryList) return;
@@ -7016,6 +7074,10 @@ def workflow_history_entry(
     input_count: int,
     output_count: int,
     conflict_action: str,
+    input_mode: str,
+    input_source: str,
+    output_mode: str,
+    channel_mode: str,
 ) -> dict[str, object]:
     steps = workflow_steps_from_payload(payload)
     active_steps = [step for step in steps if step.get("enabled", True)]
@@ -7028,17 +7090,31 @@ def workflow_history_entry(
             label = str(step.get("label") or step.get("type") or "").strip()
             if label:
                 labels.append(label)
+    replay_output_mode = "source" if str(output_mode or "").strip() == "source" else "custom"
+    replay_output_value = "" if replay_output_mode == "source" else str(output_dir)
+    history_output_path = str(output_dir)
+    if replay_output_mode == "source" and str(input_source or "").strip():
+        history_output_path = str(Path(str(input_source)).expanduser())
     return {
         "id": f"workflow-history-{time.time_ns()}",
         "run_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "output": output_label,
-        "output_path": str(output_dir),
+        "output_path": history_output_path,
         "input_count": int(input_count),
         "output_count": int(output_count),
         "step_count": len(steps),
         "active_step_count": len(active_steps),
         "conflict_action": str(conflict_action or "cancel"),
         "labels": labels,
+        "rerunnable": str(input_mode or "").strip() == "folder" and bool(str(input_source or "").strip()),
+        "replay": {
+            "input_mode": str(input_mode or "uploaded").strip() or "uploaded",
+            "input": str(input_source or "").strip(),
+            "output_mode": replay_output_mode,
+            "output": replay_output_value,
+            "channel_mode": str(channel_mode or "auto").strip() or "auto",
+            "conflict_action": str(conflict_action or "cancel"),
+        },
         "workflow": {
             "version": payload.get("version", 1),
             "app": payload.get("app", "TexCat"),
@@ -7060,6 +7136,106 @@ def clear_workflow_history() -> int:
     if WORKFLOW_HISTORY_PATH.exists():
         WORKFLOW_HISTORY_PATH.unlink()
     return len(items)
+
+
+class MappingForm:
+    def __init__(self, mapping: dict[str, object]) -> None:
+        self.mapping = mapping
+
+    def getfirst(self, key: str, default: object = None) -> object:
+        value = self.mapping.get(key, default)
+        if isinstance(value, list):
+            return value[0] if value else default
+        return value
+
+
+def workflow_history_entry_by_id(entry_id: str) -> dict[str, object]:
+    for entry in read_workflow_history():
+        if str(entry.get("id", "")).strip() == str(entry_id).strip():
+            return entry
+    raise ValueError("没有找到所选执行历史")
+
+
+def workflow_history_replay_context(entry: dict[str, object]) -> tuple[MappingForm, list[Path], Path, dict[str, object], str]:
+    replay = entry.get("replay", {})
+    if not isinstance(replay, dict):
+        raise ValueError("这条执行历史缺少重跑配置")
+    if str(replay.get("input_mode", "")).strip() != "folder":
+        raise ValueError("当前仅支持重跑自定义输入目录类型的执行历史")
+    input_dir = input_directory_from_text(str(replay.get("input", "")))
+    paths = list_directory_images(input_dir)
+    if not paths:
+        raise ValueError("执行历史里的输入目录当前没有可用图片")
+    output_mode = "source" if str(replay.get("output_mode", "")).strip() == "source" else "custom"
+    output_value = str(replay.get("output", "")).strip()
+    output_dir = DEFAULT_OUTPUT_DIR if output_mode == "source" else Path(output_value).expanduser()
+    payload = entry.get("workflow", {})
+    if not isinstance(payload, dict):
+        raise ValueError("执行历史里的工作流数据无效")
+    workflow_steps_from_payload(payload)
+    form = MappingForm(
+        {
+            "tool": "workflow",
+            "input_mode": "folder",
+            "input": str(input_dir),
+            "output_mode": output_mode,
+            "output": str(output_dir),
+            "channel_mode": str(replay.get("channel_mode", "auto") or "auto"),
+            "conflict_action": str(replay.get("conflict_action", "cancel") or "cancel"),
+            "workflow": json.dumps(payload, ensure_ascii=False),
+        }
+    )
+    return form, paths, output_dir, payload, str(replay.get("channel_mode", "auto") or "auto")
+
+
+def rerun_workflow_history_entry(entry: dict[str, object]) -> dict[str, object]:
+    form, paths, output_dir, payload, channel_mode = workflow_history_replay_context(entry)
+    if not source_output_enabled(form):
+        output_dir.mkdir(parents=True, exist_ok=True)
+    conflict_action = str(form.getfirst("conflict_action", "cancel") or "cancel")
+    name_suffix = conflict_name_suffix(form)
+    planned = planned_output_paths(paths, output_dir, form, name_suffix)
+    validate_export_targets(planned, allow_existing=conflict_action == "overwrite")
+    workflow_items, _warnings = workflow_output_items(paths, output_dir, form, payload, strict_supported=True)
+    log_lines: list[str] = []
+    for item in workflow_items:
+        source = item["source_path"]
+        destination = item["destination"]
+        if not isinstance(source, Path) or not isinstance(destination, Path):
+            continue
+        report = save_workflow_item(item, source, destination, channel_mode)
+        notes = str(item.get("notes_text", "")).strip()
+        note_text = f" [工作流: {notes}]" if notes else ""
+        log_lines.append(f"{workflow_item_source_label(item)} -> {report.path.name}{note_text}" + report_summary([report]))
+    replay_data = entry.get("replay", {})
+    history_entry_data = workflow_history_entry(
+        payload,
+        output_dir,
+        output_label_from_form(form, output_dir),
+        len(paths),
+        len(workflow_items),
+        conflict_action,
+        str(replay_data.get("input_mode", "folder") or "folder"),
+        str(replay_data.get("input", "") or ""),
+        str(replay_data.get("output_mode", "custom") or "custom"),
+        channel_mode,
+    )
+    append_workflow_history(history_entry_data)
+    return {"ok": True, "output": output_label_from_form(form, output_dir), "log": log_lines, "history": history_entry_data}
+
+
+def open_path_in_shell(path_value: str) -> str:
+    path = Path(str(path_value or "").strip()).expanduser()
+    if not path.exists():
+        raise ValueError(f"路径不存在：{path}")
+    target = path if path.is_dir() else path.parent
+    if not target.exists():
+        raise ValueError(f"路径不存在：{target}")
+    if hasattr(os, "startfile"):
+        os.startfile(str(target))
+    else:
+        webbrowser.open(target.resolve().as_uri())
+    return str(target)
 
 
 def uploaded_files(form: cgi.FieldStorage) -> list[cgi.FieldStorage]:
@@ -9222,6 +9398,7 @@ def workflow_output_items(
     steps = workflow_active_steps(payload)
     if not steps:
         raise ValueError("请先添加至少一个启用的工作流步骤")
+    name_suffix = conflict_name_suffix(form)
 
     items = workflow_source_items(paths)
     warnings_list: list[str] = []
@@ -9250,6 +9427,8 @@ def workflow_output_items(
             fallback=source.suffix.lstrip(".").lower() or "png",
         )
         destination = target_dir / f"{safe_stem(str(item.get('stem', source.stem)), source.stem)}.{ext}"
+        if name_suffix:
+            destination = destination.with_name(f"{stem_with_suffix(destination.stem, name_suffix)}{destination.suffix}")
         output_items.append(
             {
                 **item,
@@ -9811,6 +9990,26 @@ class ToolboxHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
+        if path == "/workflow-history-rerun":
+            mark_browser_alive(self.server)
+            try:
+                self.handle_rerun_workflow_history()
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except FileExistsError as exc:
+                self.send_json(409, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if path == "/open-path":
+            mark_browser_alive(self.server)
+            try:
+                self.handle_open_path()
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if path == "/clear-default-output":
             mark_browser_alive(self.server)
             try:
@@ -9990,6 +10189,17 @@ class ToolboxHandler(BaseHTTPRequestHandler):
         form = self.parse_form()
         template = delete_workflow_template(str(form.getfirst("name", "")))
         self.send_json(200, {"ok": True, "template": template})
+
+    def handle_rerun_workflow_history(self) -> None:
+        form = self.parse_form()
+        entry = workflow_history_entry_by_id(str(form.getfirst("id", "")))
+        result = rerun_workflow_history_entry(entry)
+        self.send_json(200, result)
+
+    def handle_open_path(self) -> None:
+        form = self.parse_form()
+        opened = open_path_in_shell(str(form.getfirst("path", "")))
+        self.send_json(200, {"ok": True, "path": opened})
 
     def handle_preview_channels(self) -> None:
         form = self.parse_form()
@@ -10373,6 +10583,10 @@ class ToolboxHandler(BaseHTTPRequestHandler):
                     len(paths),
                     len(workflow_items),
                     str(conflict_action),
+                    str(form.getfirst("input_mode", "uploaded") or "uploaded"),
+                    str(form.getfirst("input", "") or ""),
+                    str(form.getfirst("output_mode", "default") or "default"),
+                    str(channel_mode),
                 )
                 append_workflow_history(history_entry_data)
             else:
