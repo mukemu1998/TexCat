@@ -339,6 +339,12 @@ h1 { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: 0; }
   margin-bottom: 12px;
 }
 .workflow-step-toolbar select { min-width: 190px; }
+.workflow-step-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -2px 0 12px;
+}
 .workflow-preset-box {
   margin-bottom: 14px;
 }
@@ -376,10 +382,17 @@ h1 { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: 0; }
 .workflow-template-select-wrap button {
   min-width: 92px;
 }
+.workflow-template-fields {
+  display: grid;
+  gap: 10px;
+}
 .workflow-step-card {
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
+}
+.workflow-step-card.compact .workflow-step-summary {
+  display: none;
 }
 .workflow-step-card.active {
   margin: 0 -10px;
@@ -2040,6 +2053,12 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           </label>
           <button id="workflow-add-step" type="button">添加步骤</button>
         </div>
+        <div class="workflow-step-tools">
+          <button id="workflow-enable-all" class="secondary" type="button">全部启用</button>
+          <button id="workflow-disable-all" class="secondary" type="button">全部停用</button>
+          <button id="workflow-enable-selected-only" class="secondary" type="button">仅启用当前</button>
+          <button id="workflow-toggle-compact" class="secondary" type="button">折叠摘要</button>
+        </div>
         <div id="workflow-step-list" class="workflow-list" aria-live="polite"></div>
         <div class="workflow-actions">
           <button id="workflow-save" class="secondary" type="button">保存工作流 JSON</button>
@@ -2051,12 +2070,25 @@ button:disabled { opacity: .55; cursor: not-allowed; }
             <label>模板名称
               <input id="workflow-template-name" type="text" placeholder="例如：角色贴图导出流程">
             </label>
+            <label>模板分类
+              <input id="workflow-template-category" type="text" placeholder="例如：角色 / 场景 / UI">
+            </label>
             <div class="workflow-template-select-wrap">
               <label>已保存模板
                 <select id="workflow-template-select"></select>
               </label>
               <button id="workflow-template-refresh" class="secondary" type="button">刷新模板库</button>
             </div>
+            <label>分类筛选
+              <select id="workflow-template-filter">
+                <option value="all">全部分类</option>
+              </select>
+            </label>
+          </div>
+          <div class="workflow-template-fields">
+            <label>模板备注
+              <textarea id="workflow-template-note" rows="3" spellcheck="false" placeholder="记录这个流程适合什么贴图、输出要求或项目约定。"></textarea>
+            </label>
           </div>
           <div id="workflow-template-info" class="workflow-template-info muted">把当前工作流保存成自定义模板，后面可以一键载入或追加复用。</div>
           <div class="workflow-actions">
@@ -2064,6 +2096,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
             <button id="workflow-template-load" class="secondary" type="button">套用模板</button>
             <button id="workflow-template-append" class="secondary" type="button">追加模板</button>
             <button id="workflow-template-delete" class="secondary" type="button">删除模板</button>
+            <button id="workflow-template-clear" class="secondary" type="button">清空输入</button>
           </div>
         </div>
         <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：图片裁切 / 法线与黑白调整 / 通道拆分 / 通道合并 / 缩放 / 格式与压缩 / 命名规则；PBR 仍先保留在快速工具模式。</div>
@@ -2233,11 +2266,18 @@ const workflowApplyPreset = document.getElementById("workflow-apply-preset");
 const workflowAppendPreset = document.getElementById("workflow-append-preset");
 const workflowStepType = document.getElementById("workflow-step-type");
 const workflowAddStep = document.getElementById("workflow-add-step");
+const workflowEnableAll = document.getElementById("workflow-enable-all");
+const workflowDisableAll = document.getElementById("workflow-disable-all");
+const workflowEnableSelectedOnly = document.getElementById("workflow-enable-selected-only");
+const workflowToggleCompact = document.getElementById("workflow-toggle-compact");
 const workflowStepList = document.getElementById("workflow-step-list");
 const workflowSave = document.getElementById("workflow-save");
 const workflowLoad = document.getElementById("workflow-load");
 const workflowLoadInput = document.getElementById("workflow-load-input");
 const workflowTemplateName = document.getElementById("workflow-template-name");
+const workflowTemplateCategory = document.getElementById("workflow-template-category");
+const workflowTemplateFilter = document.getElementById("workflow-template-filter");
+const workflowTemplateNote = document.getElementById("workflow-template-note");
 const workflowTemplateSelect = document.getElementById("workflow-template-select");
 const workflowTemplateInfo = document.getElementById("workflow-template-info");
 const workflowTemplateRefresh = document.getElementById("workflow-template-refresh");
@@ -2245,6 +2285,7 @@ const workflowTemplateSave = document.getElementById("workflow-template-save");
 const workflowTemplateLoad = document.getElementById("workflow-template-load");
 const workflowTemplateAppend = document.getElementById("workflow-template-append");
 const workflowTemplateDelete = document.getElementById("workflow-template-delete");
+const workflowTemplateClear = document.getElementById("workflow-template-clear");
 const workflowJsonStatus = document.getElementById("workflow-json-status");
 const workflowDetailTitle = document.getElementById("workflow-detail-title");
 const workflowDetailBody = document.getElementById("workflow-detail-body");
@@ -2413,6 +2454,7 @@ let cropLastPointerTime = 0;
 let workflowSteps = [];
 let workflowSelectedStepId = null;
 let workflowStepSerial = 1;
+let workflowStepCompact = false;
 let workflowTemplateLibrary = [];
 const settingsKey = "texture-toolbox-settings-v4";
 const memoKey = "texcat-memo-v1";
@@ -3316,6 +3358,42 @@ function selectedWorkflowStep() {
 function workflowStatus(text) {
   if (workflowJsonStatus) workflowJsonStatus.textContent = text;
 }
+function setWorkflowStepsEnabled(enabled, mode = "all") {
+  if (!workflowSteps.length) {
+    workflowStatus("当前还没有工作流步骤可操作。");
+    return;
+  }
+  const selectedId = workflowSelectedStepId;
+  let changed = 0;
+  workflowSteps.forEach(step => {
+    const shouldEnable = mode === "selected-only" ? step.id === selectedId : enabled;
+    if (step.enabled !== shouldEnable) {
+      step.enabled = shouldEnable;
+      changed += 1;
+    }
+  });
+  if (mode === "selected-only") {
+    workflowStatus(changed ? "已仅启用当前步骤，其余步骤已停用。" : "当前已经是仅启用当前步骤。");
+  } else {
+    workflowStatus(changed ? `已${enabled ? "启用" : "停用"}全部步骤。` : `全部步骤已经处于${enabled ? "启用" : "停用"}状态。`);
+  }
+  renderWorkflowShell();
+}
+function clearWorkflowTemplateInputs() {
+  if (workflowTemplateName) workflowTemplateName.value = "";
+  if (workflowTemplateCategory) workflowTemplateCategory.value = "";
+  if (workflowTemplateNote) workflowTemplateNote.value = "";
+}
+function renderWorkflowStepToolState() {
+  if (!workflowEnableAll || !workflowDisableAll || !workflowEnableSelectedOnly || !workflowToggleCompact) return;
+  const hasSteps = workflowSteps.length > 0;
+  const hasSelected = !!selectedWorkflowStep();
+  workflowEnableAll.disabled = !hasSteps;
+  workflowDisableAll.disabled = !hasSteps;
+  workflowEnableSelectedOnly.disabled = !hasSteps || !hasSelected;
+  workflowToggleCompact.disabled = !hasSteps;
+  workflowToggleCompact.textContent = workflowStepCompact ? "展开摘要" : "折叠摘要";
+}
 function workflowStepPreviewPrompt(step) {
   if (!step) return "选中步骤后，这里会预览这一步之后的中间结果，不写出图片。";
   return step.enabled
@@ -3339,12 +3417,13 @@ function renderWorkflowSteps() {
     empty.className = "workflow-empty";
     empty.textContent = "尚未添加步骤。先选择一个步骤类型，再点击添加步骤。";
     workflowStepList.appendChild(empty);
+    renderWorkflowStepToolState();
     return;
   }
   workflowSteps.forEach((step, index) => {
     const definition = workflowStepDefinition(step.type);
     const card = document.createElement("div");
-    card.className = `workflow-step-card${step.id === workflowSelectedStepId ? " active" : ""}`;
+    card.className = `workflow-step-card${step.id === workflowSelectedStepId ? " active" : ""}${workflowStepCompact ? " compact" : ""}`;
     card.onclick = event => {
       if (event.target.closest("button")) return;
       workflowSelectedStepId = step.id;
@@ -3366,7 +3445,7 @@ function renderWorkflowSteps() {
     const toggle = document.createElement("button");
     toggle.className = "secondary";
     toggle.type = "button";
-    toggle.textContent = step.enabled ? "启用" : "停用";
+    toggle.textContent = step.enabled ? "停用" : "启用";
     toggle.onclick = () => {
       step.enabled = !step.enabled;
       workflowStatus(`${step.label || definition.label} 已${step.enabled ? "启用" : "停用"}。`);
@@ -3418,12 +3497,13 @@ function renderWorkflowSteps() {
     head.appendChild(title);
     head.appendChild(controls);
     const summary = document.createElement("div");
-    summary.className = "muted";
+    summary.className = "muted workflow-step-summary";
     summary.textContent = `${step.enabled ? "参与流程" : "已停用"} | ${workflowStepSummary(step)}`;
     card.appendChild(head);
     card.appendChild(summary);
     workflowStepList.appendChild(card);
   });
+  renderWorkflowStepToolState();
 }
 function updateWorkflowSummary() {
   if (!workflowOutputSummary) return;
@@ -4234,38 +4314,73 @@ function formatWorkflowTemplateSavedAt(value) {
   if (Number.isNaN(date.getTime())) return text;
   return date.toLocaleString("zh-CN", { hour12: false });
 }
+function workflowTemplateCategories() {
+  return [...new Set(workflowTemplateLibrary.map(item => String(item.category || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+function visibleWorkflowTemplates() {
+  const filter = workflowTemplateFilter?.value || "all";
+  if (filter === "all") return workflowTemplateLibrary;
+  return workflowTemplateLibrary.filter(item => String(item.category || "").trim() === filter);
+}
 function selectedWorkflowTemplateMeta() {
   return workflowTemplateLibrary.find(item => item.key === workflowTemplateSelect.value) || null;
 }
+function fillWorkflowTemplateInputs(meta) {
+  if (!meta) return;
+  if (workflowTemplateName) workflowTemplateName.value = meta.name || "";
+  if (workflowTemplateCategory) workflowTemplateCategory.value = meta.category || "";
+  if (workflowTemplateNote) workflowTemplateNote.value = meta.note || "";
+}
 function renderWorkflowTemplatePanel() {
-  if (!workflowTemplateSelect || !workflowTemplateInfo) return;
+  if (!workflowTemplateSelect || !workflowTemplateInfo || !workflowTemplateFilter) return;
+  const priorFilter = workflowTemplateFilter.value || "all";
   const prior = workflowTemplateSelect.value;
+  const categories = workflowTemplateCategories();
+  workflowTemplateFilter.innerHTML = "";
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = "全部分类";
+  workflowTemplateFilter.appendChild(allOption);
+  categories.forEach(category => {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    workflowTemplateFilter.appendChild(option);
+  });
+  workflowTemplateFilter.value = [...workflowTemplateFilter.options].some(option => option.value === priorFilter) ? priorFilter : "all";
+  const visible = visibleWorkflowTemplates();
   workflowTemplateSelect.innerHTML = "";
-  if (!workflowTemplateLibrary.length) {
+  if (!visible.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "暂无已保存模板";
+    option.textContent = workflowTemplateLibrary.length ? "当前分类下没有模板" : "暂无已保存模板";
     workflowTemplateSelect.appendChild(option);
   } else {
-    workflowTemplateLibrary.forEach(item => {
+    visible.forEach(item => {
       const option = document.createElement("option");
       option.value = item.key;
-      option.textContent = item.name;
+      option.textContent = item.category ? `[${item.category}] ${item.name}` : item.name;
       workflowTemplateSelect.appendChild(option);
     });
-    const matched = workflowTemplateLibrary.some(item => item.key === prior);
-    workflowTemplateSelect.value = matched ? prior : workflowTemplateLibrary[0].key;
+    const matched = visible.some(item => item.key === prior);
+    workflowTemplateSelect.value = matched ? prior : visible[0].key;
   }
   const meta = selectedWorkflowTemplateMeta();
   workflowTemplateLoad.disabled = !meta;
   workflowTemplateAppend.disabled = !meta;
   workflowTemplateDelete.disabled = !meta;
+  if (workflowTemplateClear) workflowTemplateClear.disabled = false;
   if (!meta) {
-    workflowTemplateInfo.textContent = "把当前工作流保存成自定义模板，后面可以一键载入或追加复用。";
+    workflowTemplateInfo.textContent = workflowTemplateLibrary.length
+      ? "当前分类下没有模板。可以切换筛选或直接输入新模板信息保存。"
+      : "把当前工作流保存成自定义模板，后面可以一键载入或追加复用。";
     return;
   }
+  fillWorkflowTemplateInputs(meta);
   const labels = Array.isArray(meta.labels) && meta.labels.length ? meta.labels.join(" / ") : "未记录步骤摘要";
-  workflowTemplateInfo.textContent = `${meta.step_count || 0} 个步骤 | ${formatWorkflowTemplateSavedAt(meta.saved_at)} | ${labels}`;
+  const categoryText = meta.category ? `分类：${meta.category}` : "未分类";
+  const noteText = meta.note ? ` | 备注：${meta.note}` : "";
+  workflowTemplateInfo.textContent = `${categoryText} | ${meta.step_count || 0} 个步骤 | ${formatWorkflowTemplateSavedAt(meta.saved_at)} | ${labels}${noteText}`;
 }
 async function refreshWorkflowTemplates(silent = false, preferredKey = "") {
   if (!workflowTemplateSelect) return;
@@ -4293,6 +4408,8 @@ async function refreshWorkflowTemplates(silent = false, preferredKey = "") {
 }
 async function saveCurrentWorkflowTemplate() {
   const name = String(workflowTemplateName.value || "").trim();
+  const category = String(workflowTemplateCategory?.value || "").trim();
+  const note = String(workflowTemplateNote?.value || "").trim();
   if (!name) {
     workflowStatus("请输入工作流模板名称。");
     workflowTemplateName.focus();
@@ -4306,6 +4423,8 @@ async function saveCurrentWorkflowTemplate() {
   try {
     const form = new FormData();
     form.append("name", name);
+    form.append("category", category);
+    form.append("note", note);
     form.append("workflow", JSON.stringify(workflowPayload()));
     const response = await fetch("/workflow-template-save", { method: "POST", body: form });
     const result = await response.json();
@@ -6103,12 +6222,26 @@ workflowLoadInput.onchange = () => {
   loadWorkflowJsonFile(workflowLoadInput.files && workflowLoadInput.files[0]);
   workflowLoadInput.value = "";
 };
+workflowEnableAll.onclick = () => setWorkflowStepsEnabled(true);
+workflowDisableAll.onclick = () => setWorkflowStepsEnabled(false);
+workflowEnableSelectedOnly.onclick = () => setWorkflowStepsEnabled(true, "selected-only");
+workflowToggleCompact.onclick = () => {
+  workflowStepCompact = !workflowStepCompact;
+  renderWorkflowShell();
+  workflowStatus(`步骤列表已切换为${workflowStepCompact ? "折叠摘要" : "展开摘要"}模式。`);
+};
+workflowTemplateFilter.onchange = renderWorkflowTemplatePanel;
 workflowTemplateSelect.onchange = renderWorkflowTemplatePanel;
 workflowTemplateRefresh.onclick = () => refreshWorkflowTemplates(false, workflowTemplateSelect.value);
 workflowTemplateSave.onclick = saveCurrentWorkflowTemplate;
 workflowTemplateLoad.onclick = () => applyWorkflowTemplate("replace");
 workflowTemplateAppend.onclick = () => applyWorkflowTemplate("append");
 workflowTemplateDelete.onclick = deleteSelectedWorkflowTemplate;
+workflowTemplateClear.onclick = () => {
+  clearWorkflowTemplateInputs();
+  workflowStatus("已清空模板输入，可直接填写新的模板信息。");
+  workflowTemplateName.focus();
+};
 workflowStepPreviewRun.onclick = previewWorkflowStepResult;
 workflowPreviewRun.onclick = previewWorkflowPlan;
 document.querySelectorAll(".tab").forEach(tab => {
@@ -6439,6 +6572,8 @@ def workflow_template_meta(path: Path, data: dict[str, object] | None = None) ->
     if not isinstance(raw, dict):
         raise ValueError("工作流模板格式无效")
     step_count = len(workflow_steps_from_payload(raw))
+    category = re.sub(r"\s+", " ", str(raw.get("category", "") or "").strip())
+    note = re.sub(r"\s+", " ", str(raw.get("note", "") or "").strip())
     steps = raw.get("steps", [])
     labels: list[str] = []
     if isinstance(steps, list):
@@ -6452,6 +6587,8 @@ def workflow_template_meta(path: Path, data: dict[str, object] | None = None) ->
     return {
         "key": path.stem,
         "name": str(raw.get("name", "")).strip() or path.stem,
+        "category": category,
+        "note": note,
         "step_count": step_count,
         "labels": labels,
         "saved_at": saved_at,
@@ -6470,10 +6607,12 @@ def list_workflow_templates() -> list[dict[str, object]]:
     return items
 
 
-def save_workflow_template(name: str, payload: dict[str, object]) -> tuple[dict[str, object], bool]:
+def save_workflow_template(name: str, payload: dict[str, object], category: str = "", note: str = "") -> tuple[dict[str, object], bool]:
     display_name = re.sub(r"\s+", " ", str(name or "").strip())
     if not display_name:
         raise ValueError("模板名称不能为空")
+    display_category = re.sub(r"\s+", " ", str(category or "").strip())
+    display_note = re.sub(r"\s+", " ", str(note or "").strip())
     steps = payload.get("steps", [])
     if not isinstance(steps, list) or not steps:
         raise ValueError("当前工作流还没有步骤，无法保存模板")
@@ -6485,6 +6624,8 @@ def save_workflow_template(name: str, payload: dict[str, object]) -> tuple[dict[
         "app": "TexCat",
         "kind": "workflow-template",
         "name": display_name,
+        "category": display_category,
+        "note": display_note,
         "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "steps": steps,
     }
@@ -6504,6 +6645,8 @@ def load_workflow_template(value: str) -> dict[str, object]:
         raise ValueError("工作流模板格式无效")
     workflow_template_steps(data)
     data["name"] = str(data.get("name", "")).strip() or path.stem
+    data["category"] = re.sub(r"\s+", " ", str(data.get("category", "") or "").strip())
+    data["note"] = re.sub(r"\s+", " ", str(data.get("note", "") or "").strip())
     data["key"] = path.stem
     return data
 
@@ -9360,7 +9503,12 @@ class ToolboxHandler(BaseHTTPRequestHandler):
     def handle_save_workflow_template(self) -> None:
         form = self.parse_form()
         payload = workflow_payload_from_form(form)
-        template, updated = save_workflow_template(str(form.getfirst("name", "")), payload)
+        template, updated = save_workflow_template(
+            str(form.getfirst("name", "")),
+            payload,
+            str(form.getfirst("category", "")),
+            str(form.getfirst("note", "")),
+        )
         self.send_json(200, {"ok": True, "template": template, "updated": updated})
 
     def handle_load_workflow_template(self) -> None:

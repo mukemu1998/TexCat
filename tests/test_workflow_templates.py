@@ -55,18 +55,23 @@ class WorkflowTemplateStorageTests(unittest.TestCase):
         }
 
     def test_workflow_template_roundtrip_and_listing(self) -> None:
-        meta, updated = tb.save_workflow_template("角色贴图流程", self.sample_payload())
+        meta, updated = tb.save_workflow_template("角色贴图流程", self.sample_payload(), "角色", "适合角色常规贴图导出")
         self.assertFalse(updated)
         self.assertEqual(meta["name"], "角色贴图流程")
+        self.assertEqual(meta["category"], "角色")
+        self.assertEqual(meta["note"], "适合角色常规贴图导出")
         self.assertEqual(meta["step_count"], 2)
         self.assertEqual(meta["labels"], ["缩放尺寸", "格式与压缩"])
 
         items = tb.list_workflow_templates()
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["key"], meta["key"])
+        self.assertEqual(items[0]["category"], "角色")
 
         loaded = tb.load_workflow_template(str(meta["key"]))
         self.assertEqual(loaded["name"], "角色贴图流程")
+        self.assertEqual(loaded["category"], "角色")
+        self.assertEqual(loaded["note"], "适合角色常规贴图导出")
         self.assertEqual(len(loaded["steps"]), 2)
 
         removed = tb.delete_workflow_template(str(meta["key"]))
