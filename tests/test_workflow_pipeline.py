@@ -192,6 +192,57 @@ class WorkflowPipelineTests(unittest.TestCase):
         self.assertTrue(items[0]["conflict"])
         self.assertIn("目标位置已存在", items[0]["reason"])
 
+    def test_workflow_step_preview_payload_returns_rendered_items(self) -> None:
+        path = self.make_rgba(self.base / "base_rgba.png", (255, 128, 64, 255), (8, 8))
+        payload = {
+            "steps": [
+                {
+                    "id": "resize-step",
+                    "type": "resize",
+                    "enabled": True,
+                    "options": {
+                        "sizes": [4],
+                        "custom": "",
+                        "profile": "detail",
+                        "format": "keep",
+                        "preserve": True,
+                        "append_size_suffix": True,
+                    },
+                }
+            ]
+        }
+        result = tb.workflow_step_preview_payload([path], payload, "resize-step")
+        self.assertEqual(result["step_label"], "resize")
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertTrue(result["items"][0]["preview"].startswith("data:image/png;base64,"))
+        self.assertEqual(result["items"][0]["name"], "base_rgba_4x4.png")
+        self.assertEqual(result["items"][0]["size"], "4x4")
+
+    def test_workflow_step_preview_payload_applies_selected_disabled_step(self) -> None:
+        path = self.make_rgba(self.base / "base_rgba.png", (255, 128, 64, 255), (8, 8))
+        payload = {
+            "steps": [
+                {
+                    "id": "resize-step",
+                    "type": "resize",
+                    "enabled": False,
+                    "options": {
+                        "sizes": [4],
+                        "custom": "",
+                        "profile": "detail",
+                        "format": "keep",
+                        "preserve": True,
+                        "append_size_suffix": True,
+                    },
+                }
+            ]
+        }
+        result = tb.workflow_step_preview_payload([path], payload, "resize-step")
+        self.assertTrue(result["selected_disabled"])
+        self.assertEqual(result["items"][0]["size"], "4x4")
+        self.assertIn("当前步骤已停用", "；".join(result["warnings"]))
+
     def test_workflow_batch_crop_requires_same_size(self) -> None:
         paths = [
             self.make_rgba(self.base / "a.png", (255, 0, 0, 255), (8, 8)),

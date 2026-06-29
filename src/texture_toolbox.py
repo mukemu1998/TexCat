@@ -456,6 +456,26 @@ h1 { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: 0; }
 .workflow-preview-table .preview-row {
   grid-template-columns: minmax(150px, 1fr) minmax(170px, 1fr) minmax(90px, .5fr) minmax(100px, .6fr) minmax(220px, 1.4fr);
 }
+.workflow-step-preview {
+  margin-top: 14px;
+}
+.workflow-step-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+.workflow-step-preview-meta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.workflow-step-preview-empty {
+  padding: 12px 0;
+  color: var(--muted);
+}
 @media (max-width: 980px) {
   .workflow-grid { grid-template-columns: 1fr; }
   .workflow-column { border-left: 0; border-top: 1px solid var(--border); padding: 14px 0 0; }
@@ -1930,9 +1950,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     <div class="section-head">
       <div>
         <strong>工作流模式 Beta</strong>
-        <div class="muted">当前可真实执行：图片裁切、法线/黑白调整、通道拆分、缩放、格式与压缩、命名规则；其他步骤继续在 Beta 中迭代接入。</div>
+        <div class="muted">当前可真实执行：图片裁切、法线/黑白调整、通道拆分、通道合并、缩放、格式与压缩、命名规则；当前步骤预览继续在 Beta 中完善。</div>
       </div>
-      <span class="workflow-badge">阶段 7 / 拆分执行链 Beta</span>
+      <span class="workflow-badge">阶段 8 / 当前步骤预览 Beta</span>
     </div>
     <div class="workflow-grid">
       <div class="workflow-column">
@@ -1973,6 +1993,15 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <strong id="workflow-detail-title">未选中步骤</strong>
           <div id="workflow-detail-body" class="workflow-detail-body">添加或选择一个步骤后，这里会显示该步骤的参数设置。</div>
         </div>
+        <div class="workflow-step-preview">
+          <div class="workflow-preview-actions">
+            <button id="workflow-step-preview-run" class="secondary" type="button">预览当前步骤结果</button>
+            <span id="workflow-step-preview-info" class="muted">选中步骤后，这里会预览这一步之后的中间结果，不写出图片。</span>
+          </div>
+          <div id="workflow-step-preview-list" class="workflow-step-preview-grid">
+            <div class="workflow-step-preview-empty">尚未预览当前步骤结果。</div>
+          </div>
+        </div>
         <div id="workflow-output-summary" class="workflow-summary">
           <div><span>输入资源</span><strong id="workflow-summary-inputs">0</strong></div>
           <div><span>处理步骤</span><strong id="workflow-summary-steps">0</strong></div>
@@ -1993,7 +2022,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <progress id="workflow-run-progress" max="100" value="0"></progress>
           <div id="workflow-run-status" class="run-status muted">等待执行。</div>
         </div>
-        <div class="notice" style="margin-top:14px;">工作流 Beta 当前可真实导出：图片裁切、法线/黑白调整、通道拆分、缩放、格式与压缩、命名规则。通道合并会在后续阶段继续接入。</div>
+        <div class="notice" style="margin-top:14px;">工作流 Beta 当前可真实导出：图片裁切、法线/黑白调整、通道拆分、通道合并、缩放、格式与压缩、命名规则。PBR 仍保留在快速工具模式。</div>
       </div>
     </div>
   </section>
@@ -2129,6 +2158,9 @@ const workflowSummaryOutputs = document.getElementById("workflow-summary-outputs
 const workflowSummaryNaming = document.getElementById("workflow-summary-naming");
 const workflowSummaryConflicts = document.getElementById("workflow-summary-conflicts");
 const workflowSummaryExport = document.getElementById("workflow-summary-export");
+const workflowStepPreviewRun = document.getElementById("workflow-step-preview-run");
+const workflowStepPreviewInfo = document.getElementById("workflow-step-preview-info");
+const workflowStepPreviewList = document.getElementById("workflow-step-preview-list");
 const workflowPreviewRun = document.getElementById("workflow-preview-run");
 const workflowPreviewInfo = document.getElementById("workflow-preview-info");
 const workflowPreviewList = document.getElementById("workflow-preview-list");
@@ -3000,6 +3032,21 @@ function selectedWorkflowStep() {
 function workflowStatus(text) {
   if (workflowJsonStatus) workflowJsonStatus.textContent = text;
 }
+function workflowStepPreviewPrompt(step) {
+  if (!step) return "选中步骤后，这里会预览这一步之后的中间结果，不写出图片。";
+  return step.enabled
+    ? `当前选中：${step.label}。点击“预览当前步骤结果”查看这一步之后的中间结果。`
+    : `当前选中：${step.label}（已停用）。这里仍可预览启用后的结果。`;
+}
+function resetWorkflowStepPreview(message) {
+  if (!workflowStepPreviewInfo || !workflowStepPreviewList) return;
+  workflowStepPreviewInfo.textContent = message;
+  workflowStepPreviewList.innerHTML = "";
+  const empty = document.createElement("div");
+  empty.className = "workflow-step-preview-empty";
+  empty.textContent = "尚未预览当前步骤结果。";
+  workflowStepPreviewList.appendChild(empty);
+}
 function renderWorkflowSteps() {
   if (!workflowStepList) return;
   workflowStepList.innerHTML = "";
@@ -3142,6 +3189,7 @@ function refreshWorkflowAfterOptionChange(step, message = "工作流步骤参数
   step.summary = workflowStepSummary(step);
   renderWorkflowSteps();
   updateWorkflowSummary();
+  if (step.id === workflowSelectedStepId) resetWorkflowStepPreview(workflowStepPreviewPrompt(step));
   if (message) workflowStatus(message);
 }
 function appendWorkflowDetailNote(definition) {
@@ -3942,6 +3990,42 @@ function renderWorkflowPreview(result) {
   workflowSummaryConflicts.textContent = conflicts ? `${conflicts} 个冲突` : "未发现冲突";
   workflowPreviewInfo.textContent = `${result.total || items.length} 个预计输出，${conflicts ? `${conflicts} 个冲突` : "未发现冲突"}${warningText ? `；${warningText}` : ""}`;
 }
+function renderWorkflowStepPreview(result) {
+  const items = result.items || [];
+  workflowStepPreviewList.innerHTML = "";
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "workflow-step-preview-empty";
+    empty.textContent = "当前步骤没有生成可预览的结果。";
+    workflowStepPreviewList.appendChild(empty);
+  } else {
+    for (const item of items) {
+      const tile = document.createElement("div");
+      tile.className = "preview-tile";
+      const img = document.createElement("img");
+      img.alt = item.name || "步骤预览";
+      setPreviewImage(img, item.preview || "");
+      const caption = document.createElement("div");
+      caption.className = "preview-caption";
+      const title = document.createElement("strong");
+      title.textContent = item.name || "未命名";
+      const source = document.createElement("div");
+      source.textContent = item.source || "未知来源";
+      const meta = document.createElement("div");
+      meta.className = "workflow-step-preview-meta";
+      meta.textContent = `${item.size || "未知尺寸"} | ${item.mode || "未知模式"} | ${item.format || "KEEP"}${item.notes ? ` | ${item.notes}` : ""}`;
+      caption.appendChild(title);
+      caption.appendChild(source);
+      caption.appendChild(meta);
+      tile.appendChild(img);
+      tile.appendChild(caption);
+      workflowStepPreviewList.appendChild(tile);
+    }
+  }
+  const hiddenCount = Math.max(0, Number(result.total || 0) - items.length);
+  const warningText = Array.isArray(result.warnings) && result.warnings.length ? `；${result.warnings.join("；")}` : "";
+  workflowStepPreviewInfo.textContent = `${result.step_label || "当前步骤"}：共 ${result.total || 0} 项结果，当前展示 ${items.length} 项${hiddenCount ? `，其余 ${hiddenCount} 项未展开` : ""}${result.selected_disabled ? "；当前步骤已停用，这里预览的是启用后的结果" : ""}${warningText}`;
+}
 async function previewWorkflowPlan() {
   let count = 0;
   if (inputMode() === "folder") {
@@ -3980,6 +4064,40 @@ async function previewWorkflowPlan() {
     workflowPreviewRun.disabled = false;
   }
 }
+async function previewWorkflowStepResult() {
+  let count = 0;
+  if (inputMode() === "folder") {
+    const ok = await refreshFolderFiles(false);
+    count = folderFiles.length;
+    if (!ok || !count) { workflowStatus("请确认自定义输入目录里有支持格式图片。"); return; }
+  } else {
+    count = files.length;
+    if (!count) { workflowStatus("请先拖入或选择图片。"); return; }
+  }
+  const step = selectedWorkflowStep();
+  if (!step) {
+    workflowStatus("请先选择一个工作流步骤。");
+    return;
+  }
+  workflowStepPreviewRun.disabled = true;
+  workflowStepPreviewInfo.textContent = "正在生成当前步骤预览...";
+  try {
+    const form = new FormData();
+    appendWorkflowCommon(form);
+    form.append("step_id", step.id);
+    const response = await fetch("/preview-workflow-step", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "预览失败");
+    renderWorkflowStepPreview(result);
+    workflowStatus(`已生成当前步骤预览：${result.step_label || step.label}，共 ${result.total || 0} 项结果。`);
+  } catch (error) {
+    workflowStepPreviewInfo.textContent = `预览失败：${error.message}`;
+    workflowStatus(`当前步骤预览失败：${error.message}`);
+    log(`工作流当前步骤预览失败：${error.message}`);
+  } finally {
+    workflowStepPreviewRun.disabled = false;
+  }
+}
 function renderWorkflowShell() {
   if (!workflowResourceSummary || !workflowResourceList) return;
   const items = workflowInputItems();
@@ -4015,6 +4133,9 @@ function renderWorkflowShell() {
       workflowResourceList.appendChild(more);
     }
   }
+  const selected = selectedWorkflowStep();
+  if (workflowStepPreviewRun) workflowStepPreviewRun.disabled = !selected || !items.length;
+  resetWorkflowStepPreview(workflowStepPreviewPrompt(selected));
   updateWorkflowSummary();
   renderWorkflowSteps();
   renderWorkflowDetail();
@@ -5539,6 +5660,7 @@ workflowLoadInput.onchange = () => {
   loadWorkflowJsonFile(workflowLoadInput.files && workflowLoadInput.files[0]);
   workflowLoadInput.value = "";
 };
+workflowStepPreviewRun.onclick = previewWorkflowStepResult;
 workflowPreviewRun.onclick = previewWorkflowPlan;
 document.querySelectorAll(".tab").forEach(tab => {
   tab.onclick = () => {
@@ -7951,6 +8073,42 @@ def workflow_items_before_step(
     return items, warnings_list
 
 
+def workflow_items_through_step(
+    paths: list[Path],
+    payload: dict[str, object],
+    step_id: str,
+    *,
+    strict_supported: bool,
+) -> tuple[list[dict[str, object]], dict[str, object], list[str]]:
+    steps = workflow_steps_from_payload(payload)
+    items = workflow_source_items(paths)
+    warnings_list: list[str] = []
+    unsupported_types: list[str] = []
+    selected_step: dict[str, object] | None = None
+    for step in steps:
+        current_id = str(step.get("id", ""))
+        is_selected = current_id == step_id
+        if not step.get("enabled", True) and not is_selected:
+            continue
+        step_type = str(step["type"])
+        options = step["options"] if isinstance(step["options"], dict) else {}
+        items, unsupported = workflow_apply_step(items, step_type, options)
+        if unsupported and unsupported not in unsupported_types:
+            unsupported_types.append(unsupported)
+        if is_selected:
+            selected_step = step
+            break
+    if selected_step is None:
+        raise ValueError("没有找到当前工作流步骤")
+    if selected_step.get("enabled", True) is False:
+        warnings_list.append("当前步骤已停用，预览结果按启用后的效果计算")
+    if unsupported_types:
+        if strict_supported:
+            raise ValueError(f"当前工作流暂不支持在此步骤预览中执行这些步骤：{'、'.join(unsupported_types)}")
+        warnings_list.append(f"{'、'.join(unsupported_types)}暂未参与当前步骤预览")
+    return items, selected_step, warnings_list
+
+
 def workflow_output_items(
     paths: list[Path],
     output_dir: Path,
@@ -8068,6 +8226,41 @@ def workflow_merge_sources_payload(paths: list[Path], payload: dict[str, object]
         "ok": True,
         "total": len(payload_items),
         "items": payload_items,
+        "warnings": warnings_list,
+    }
+
+
+def workflow_step_preview_payload(paths: list[Path], payload: dict[str, object], step_id: str) -> dict[str, object]:
+    items, selected_step, warnings_list = workflow_items_through_step(paths, payload, step_id, strict_supported=True)
+    preview_items = []
+    limit = 8
+    for item in items[:limit]:
+        source_path = item.get("source_path")
+        if not isinstance(source_path, Path):
+            continue
+        image, _icc_profile, _source_had_alpha = workflow_render_item_image(item, "auto")
+        ext = normalized_output_format(
+            item.get("ext", source_path.suffix.lstrip(".").lower()),
+            allow_keep=False,
+            fallback=source_path.suffix.lstrip(".").lower() or "png",
+        )
+        preview_items.append(
+            {
+                "source": workflow_item_source_label(item),
+                "name": f"{safe_stem(str(item.get('stem', source_path.stem)), source_path.stem)}.{ext}",
+                "size": str(item.get("size_label", "")),
+                "mode": str(item.get("image_mode", "")),
+                "format": ext.upper(),
+                "notes": " / ".join(str(note) for note in item.get("notes", [])),
+                "preview": preview_data_url(image, 320),
+            }
+        )
+    return {
+        "ok": True,
+        "step_label": str(selected_step.get("label") or selected_step.get("type") or "当前步骤"),
+        "selected_disabled": selected_step.get("enabled", True) is False,
+        "total": len(items),
+        "items": preview_items,
         "warnings": warnings_list,
     }
 
@@ -8509,6 +8702,15 @@ class ToolboxHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
+        if path == "/preview-workflow-step":
+            mark_browser_alive(self.server)
+            try:
+                self.handle_preview_workflow_step()
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if path == "/workflow-merge-sources":
             mark_browser_alive(self.server)
             try:
@@ -8705,6 +8907,25 @@ class ToolboxHandler(BaseHTTPRequestHandler):
             output_dir = output_directory_from_form(form)
             payload = workflow_payload_from_form(form)
             result = workflow_preview_plan(paths, output_dir, form, payload)
+            if upload_dir is not None:
+                cleanup_uploads(upload_dir)
+                upload_dir = None
+            self.send_json(200, result)
+        finally:
+            if upload_dir is not None:
+                cleanup_uploads(upload_dir)
+
+    def handle_preview_workflow_step(self) -> None:
+        form = self.parse_form()
+        upload_dir, paths = collect_source_paths(form)
+        try:
+            if not paths:
+                raise ValueError("没有可用于预览当前步骤的图片")
+            step_id = str(form.getfirst("step_id", "")).strip()
+            if not step_id:
+                raise ValueError("缺少工作流步骤标识")
+            payload = workflow_payload_from_form(form)
+            result = workflow_step_preview_payload(paths, payload, step_id)
             if upload_dir is not None:
                 cleanup_uploads(upload_dir)
                 upload_dir = None
