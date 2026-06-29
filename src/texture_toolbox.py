@@ -1930,9 +1930,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     <div class="section-head">
       <div>
         <strong>工作流模式 Beta</strong>
-        <div class="muted">当前可真实执行：图片裁切、缩放、格式与压缩、命名规则；其他步骤继续在 Beta 中迭代接入。</div>
+        <div class="muted">当前可真实执行：图片裁切、法线/黑白调整、缩放、格式与压缩、命名规则；其他步骤继续在 Beta 中迭代接入。</div>
       </div>
-      <span class="workflow-badge">阶段 5 / 裁切执行链 Beta</span>
+      <span class="workflow-badge">阶段 6 / 调整执行链 Beta</span>
     </div>
     <div class="workflow-grid">
       <div class="workflow-column">
@@ -1964,7 +1964,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <button id="workflow-load" class="secondary" type="button">载入工作流 JSON</button>
           <input id="workflow-load-input" type="file" accept=".json,application/json" hidden>
         </div>
-        <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：图片裁切 / 缩放 / 格式与压缩 / 命名规则；其余步骤先保留结构和预览。</div>
+        <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：图片裁切 / 法线与黑白调整 / 缩放 / 格式与压缩 / 命名规则；其余步骤先保留结构和预览。</div>
       </div>
       <div class="workflow-column">
         <div class="workflow-column-title">参数与输出摘要</div>
@@ -1993,7 +1993,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <progress id="workflow-run-progress" max="100" value="0"></progress>
           <div id="workflow-run-status" class="run-status muted">等待执行。</div>
         </div>
-        <div class="notice" style="margin-top:14px;">工作流 Beta 当前可真实导出：图片裁切、缩放、格式与压缩、命名规则。法线/黑白调整、通道拆分、通道合并会在后续阶段继续接入。</div>
+        <div class="notice" style="margin-top:14px;">工作流 Beta 当前可真实导出：图片裁切、法线/黑白调整、缩放、格式与压缩、命名规则。通道拆分、通道合并会在后续阶段继续接入。</div>
       </div>
     </div>
   </section>
@@ -2581,7 +2581,7 @@ const workflowStepDefinitions = {
   normal: {
     label: "法线/黑白调整",
     summary: "调整法线强度或黑白图色阶曲线。",
-    detail: "参数占位：法线 OpenGL/DX、强度、黑白强度、色阶、Gamma、曲线、反相。"
+    detail: "复用法线/黑白图调整模块的模式、强度、OpenGL/DX、色阶、Gamma、曲线和输出格式。"
   },
   pbr: {
     label: "PBR辅助生成",
@@ -2695,6 +2695,22 @@ function currentCropWorkflowOptions() {
     })),
   });
 }
+function currentNormalWorkflowOptions() {
+  const mode = strengthKind.value === "roughness" ? "roughness" : "normal";
+  return workflowMergeOptions("normal", {
+    strength_mode: mode,
+    format: document.getElementById("normal-format").value || "keep",
+    strength: mode === "roughness" ? Number(roughnessStrength.value) || 1.0 : Number(normalStrength.value) || 1.5,
+    normal_mode: normalMode.value === "directx" ? "directx" : "opengl",
+    contrast: Number(roughnessContrast.value) || 1.0,
+    bias: Number(roughnessBias.value) || 0,
+    black: Number(roughnessBlack.value) || 0,
+    white: Number(roughnessWhite.value) || 1,
+    gamma: Number(roughnessGamma.value) || 1,
+    curve: Number(roughnessCurve.value) || 0,
+    invert: document.getElementById("roughness-invert").checked,
+  });
+}
 function workflowDefaultOptions(type) {
   if (type === "resize") {
     return { sizes: [], custom: "", profile: "detail", format: "keep", preserve: true, append_size_suffix: true };
@@ -2704,6 +2720,21 @@ function workflowDefaultOptions(type) {
   }
   if (type === "crop") {
     return { mode: "single", source_index: 0, format: "keep", crops: [] };
+  }
+  if (type === "normal") {
+    return {
+      strength_mode: "normal",
+      format: "keep",
+      strength: 1.5,
+      normal_mode: "opengl",
+      contrast: 1.0,
+      bias: 0.0,
+      black: 0.0,
+      white: 1.0,
+      gamma: 1.0,
+      curve: 0.0,
+      invert: false,
+    };
   }
   if (type === "rename") {
     return { format: "keep", steps: [workflowDefaultRenameStep()] };
@@ -2725,6 +2756,21 @@ function workflowMergeOptions(type, options) {
     merged.source_index = Math.max(0, Math.floor(Number(merged.source_index) || 0));
     merged.format = merged.format === "keep" || workflowFormatValues.includes(merged.format) ? merged.format : "keep";
     merged.crops = workflowNormalizeCropItems(merged.crops);
+  } else if (type === "normal") {
+    merged.strength_mode = merged.strength_mode === "roughness" ? "roughness" : "normal";
+    merged.format = merged.format === "keep" || workflowFormatValues.includes(merged.format) ? merged.format : "keep";
+    merged.strength = merged.strength_mode === "roughness"
+      ? Math.max(0, Math.min(2, Number(merged.strength) || 1.0))
+      : Math.max(0, Math.min(4, Number(merged.strength) || 1.5));
+    merged.normal_mode = merged.normal_mode === "directx" ? "directx" : "opengl";
+    merged.contrast = Math.max(0, Math.min(3, Number(merged.contrast) || 1.0));
+    merged.bias = Math.max(-1, Math.min(1, Number(merged.bias) || 0));
+    merged.black = Math.max(0, Math.min(0.95, Number(merged.black) || 0));
+    merged.white = Math.max(0.05, Math.min(1, Number(merged.white) || 1));
+    if (merged.white <= merged.black + 0.01) merged.white = Math.min(1, merged.black + 0.01);
+    merged.gamma = Math.max(0.2, Math.min(3, Number(merged.gamma) || 1));
+    merged.curve = Math.max(-1, Math.min(1, Number(merged.curve) || 0));
+    merged.invert = merged.invert === true;
   } else if (type === "export") {
     merged.format = workflowFormatValues.includes(merged.format) ? merged.format : "png";
     merged.quality = Math.max(80, Math.min(100, Math.round(Number(merged.quality) || 95)));
@@ -2762,6 +2808,7 @@ function workflowInitialOptions(type) {
   try {
     if (type === "resize") return currentResizeWorkflowOptions();
     if (type === "crop") return currentCropWorkflowOptions();
+    if (type === "normal") return currentNormalWorkflowOptions();
     if (type === "export") return currentExportWorkflowOptions();
     if (type === "rename") return currentRenameWorkflowOptions();
   } catch (_error) {
@@ -2813,6 +2860,13 @@ function workflowStepSummary(step) {
     const cropCount = options.crops.length || 0;
     const sourceText = options.mode === "single" ? `第 ${options.source_index + 1} 张参考图` : "全部输入";
     return `${options.mode === "batch" ? "多图同位置" : "单图"}，${sourceText}，${cropCount} 个裁切，${formatText}`;
+  }
+  if (step.type === "normal") {
+    const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
+    if (options.strength_mode === "roughness") {
+      return `黑白/粗糙度，强度 ${Number(options.strength).toFixed(1)}，对比 ${Number(options.contrast).toFixed(1)}，${formatText}`;
+    }
+    return `法线 ${options.normal_mode === "directx" ? "DirectX / DX" : "OpenGL"}，强度 ${Number(options.strength).toFixed(1)}，${formatText}`;
   }
   if (step.type === "export") {
     const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
@@ -3160,6 +3214,149 @@ function renderWorkflowCropDetail(step) {
   renderCropInfo();
   workflowDetailBody.appendChild(card);
 }
+function renderWorkflowNormalDetail(step) {
+  step.options = workflowMergeOptions("normal", step.options);
+  const options = step.options;
+  const card = document.createElement("div");
+  card.className = "workflow-param-card";
+  card.innerHTML = `
+    <div class="workflow-param-actions">
+      <button class="secondary" type="button" data-workflow-sync>读取当前法线/黑白图调整模块设置</button>
+      <span class="muted">先在快速工具模式里把滑杆调好，再同步到工作流。</span>
+    </div>
+    <div class="workflow-param-grid">
+      <label>调整模式
+        <select data-workflow-normal-kind>
+          <option value="normal"${options.strength_mode === "normal" ? " selected" : ""}>法线贴图</option>
+          <option value="roughness"${options.strength_mode === "roughness" ? " selected" : ""}>黑白 / 粗糙度贴图</option>
+        </select>
+      </label>
+      <label>输出格式
+        <select data-workflow-format>${workflowFormatOptionHtml(options.format, true)}</select>
+      </label>
+    </div>
+    <div class="workflow-param-grid" data-workflow-normal-panel>
+      <label>法线强度
+        <input data-workflow-normal-strength type="range" min="0" max="4" step="0.1" value="${Number(options.strength).toFixed(1)}">
+        <strong data-workflow-normal-strength-value>${Number(options.strength).toFixed(1)}</strong>
+      </label>
+      <label>法线方向
+        <select data-workflow-normal-mode>
+          <option value="opengl"${options.normal_mode === "opengl" ? " selected" : ""}>OpenGL</option>
+          <option value="directx"${options.normal_mode === "directx" ? " selected" : ""}>DirectX / DX</option>
+        </select>
+      </label>
+    </div>
+    <div class="workflow-param-grid" data-workflow-roughness-panel>
+      <label>黑白强度
+        <input data-workflow-roughness-strength type="range" min="0" max="2" step="0.1" value="${Number(options.strength).toFixed(1)}">
+        <strong data-workflow-roughness-strength-value>${Number(options.strength).toFixed(1)}</strong>
+      </label>
+      <label>对比
+        <input data-workflow-roughness-contrast type="range" min="0" max="3" step="0.1" value="${Number(options.contrast).toFixed(1)}">
+        <strong data-workflow-roughness-contrast-value>${Number(options.contrast).toFixed(1)}</strong>
+      </label>
+      <label>倾向
+        <input data-workflow-roughness-bias type="range" min="-1" max="1" step="0.1" value="${Number(options.bias).toFixed(1)}">
+        <strong data-workflow-roughness-bias-value>${Number(options.bias).toFixed(1)}</strong>
+      </label>
+      <label>黑场
+        <input data-workflow-roughness-black type="range" min="0" max="0.95" step="0.01" value="${Number(options.black).toFixed(2)}">
+        <strong data-workflow-roughness-black-value>${Number(options.black).toFixed(2)}</strong>
+      </label>
+      <label>白场
+        <input data-workflow-roughness-white type="range" min="0.05" max="1" step="0.01" value="${Number(options.white).toFixed(2)}">
+        <strong data-workflow-roughness-white-value>${Number(options.white).toFixed(2)}</strong>
+      </label>
+      <label>Gamma
+        <input data-workflow-roughness-gamma type="range" min="0.2" max="3" step="0.05" value="${Number(options.gamma).toFixed(2)}">
+        <strong data-workflow-roughness-gamma-value>${Number(options.gamma).toFixed(2)}</strong>
+      </label>
+      <label>曲线
+        <input data-workflow-roughness-curve type="range" min="-1" max="1" step="0.1" value="${Number(options.curve).toFixed(1)}">
+        <strong data-workflow-roughness-curve-value>${Number(options.curve).toFixed(1)}</strong>
+      </label>
+      <label><input data-workflow-roughness-invert type="checkbox"${options.invert ? " checked" : ""}>黑白反相</label>
+    </div>
+    <div class="muted" data-workflow-normal-info></div>
+  `;
+  const kindSelect = card.querySelector("[data-workflow-normal-kind]");
+  const formatSelect = card.querySelector("[data-workflow-format]");
+  const normalPanel = card.querySelector("[data-workflow-normal-panel]");
+  const roughnessPanel = card.querySelector("[data-workflow-roughness-panel]");
+  const info = card.querySelector("[data-workflow-normal-info]");
+  const normalStrengthInput = card.querySelector("[data-workflow-normal-strength]");
+  const normalStrengthValue = card.querySelector("[data-workflow-normal-strength-value]");
+  const roughnessStrengthInput = card.querySelector("[data-workflow-roughness-strength]");
+  const roughnessStrengthValue = card.querySelector("[data-workflow-roughness-strength-value]");
+  const roughnessContrastInput = card.querySelector("[data-workflow-roughness-contrast]");
+  const roughnessContrastValue = card.querySelector("[data-workflow-roughness-contrast-value]");
+  const roughnessBiasInput = card.querySelector("[data-workflow-roughness-bias]");
+  const roughnessBiasValue = card.querySelector("[data-workflow-roughness-bias-value]");
+  const roughnessBlackInput = card.querySelector("[data-workflow-roughness-black]");
+  const roughnessBlackValue = card.querySelector("[data-workflow-roughness-black-value]");
+  const roughnessWhiteInput = card.querySelector("[data-workflow-roughness-white]");
+  const roughnessWhiteValue = card.querySelector("[data-workflow-roughness-white-value]");
+  const roughnessGammaInput = card.querySelector("[data-workflow-roughness-gamma]");
+  const roughnessGammaValue = card.querySelector("[data-workflow-roughness-gamma-value]");
+  const roughnessCurveInput = card.querySelector("[data-workflow-roughness-curve]");
+  const roughnessCurveValue = card.querySelector("[data-workflow-roughness-curve-value]");
+  const roughnessInvertInput = card.querySelector("[data-workflow-roughness-invert]");
+  const updateMode = () => {
+    const roughnessMode = kindSelect.value === "roughness";
+    normalPanel.style.display = roughnessMode ? "none" : "grid";
+    roughnessPanel.style.display = roughnessMode ? "grid" : "none";
+    info.textContent = roughnessMode
+      ? "黑白 / 粗糙度模式会进入色阶、Gamma、曲线和反相流程，输出为灰度结果。"
+      : "法线模式会调整法线强度与 OpenGL / DX 方向；自动通道模式下，无 Alpha 源图会按 RGB 24位导出。";
+  };
+  const updateLabels = () => {
+    normalStrengthValue.textContent = Number(normalStrengthInput.value).toFixed(1);
+    roughnessStrengthValue.textContent = Number(roughnessStrengthInput.value).toFixed(1);
+    roughnessContrastValue.textContent = Number(roughnessContrastInput.value).toFixed(1);
+    roughnessBiasValue.textContent = Number(roughnessBiasInput.value).toFixed(1);
+    roughnessBlackValue.textContent = Number(roughnessBlackInput.value).toFixed(2);
+    roughnessWhiteValue.textContent = Number(roughnessWhiteInput.value).toFixed(2);
+    roughnessGammaValue.textContent = Number(roughnessGammaInput.value).toFixed(2);
+    roughnessCurveValue.textContent = Number(roughnessCurveInput.value).toFixed(1);
+  };
+  const apply = () => {
+    step.options = workflowMergeOptions("normal", {
+      strength_mode: kindSelect.value,
+      format: formatSelect.value,
+      strength: kindSelect.value === "roughness" ? Number(roughnessStrengthInput.value) : Number(normalStrengthInput.value),
+      normal_mode: card.querySelector("[data-workflow-normal-mode]").value,
+      contrast: Number(roughnessContrastInput.value),
+      bias: Number(roughnessBiasInput.value),
+      black: Number(roughnessBlackInput.value),
+      white: Number(roughnessWhiteInput.value),
+      gamma: Number(roughnessGammaInput.value),
+      curve: Number(roughnessCurveInput.value),
+      invert: roughnessInvertInput.checked,
+    });
+    refreshWorkflowAfterOptionChange(step);
+  };
+  card.querySelector("[data-workflow-sync]").onclick = () => {
+    step.options = currentNormalWorkflowOptions();
+    workflowStatus("已读取当前法线/黑白图调整模块设置。");
+    renderWorkflowShell();
+  };
+  card.querySelectorAll("input, select").forEach(input => {
+    input.oninput = () => {
+      updateLabels();
+      updateMode();
+      apply();
+    };
+    input.onchange = () => {
+      updateLabels();
+      updateMode();
+      apply();
+    };
+  });
+  updateLabels();
+  updateMode();
+  workflowDetailBody.appendChild(card);
+}
 function workflowRenameOpLabel(op) {
   return {
     replace: "查找替换",
@@ -3251,6 +3448,8 @@ function renderWorkflowDetail() {
     renderWorkflowResizeDetail(step);
   } else if (step.type === "crop") {
     renderWorkflowCropDetail(step);
+  } else if (step.type === "normal") {
+    renderWorkflowNormalDetail(step);
   } else if (step.type === "export") {
     renderWorkflowExportDetail(step);
   } else if (step.type === "rename") {
@@ -5591,13 +5790,19 @@ def adjust_normal_one(
     return core.save_image(result, source, destination, False, None, channel_mode)
 
 
-def normal_flip_from_form(form: cgi.FieldStorage) -> bool:
-    mode = form.getfirst("normal_mode", "").strip().lower()
+def normal_flip_from_values(normal_mode: object, flip_g: object = False) -> bool:
+    mode = str(normal_mode or "").strip().lower()
     if mode in ("directx", "dx"):
         return True
     if mode == "opengl":
         return False
-    return form.getfirst("flip_g", "0") == "1"
+    if isinstance(flip_g, str):
+        return flip_g.strip() in ("1", "true", "yes", "on")
+    return bool(flip_g)
+
+
+def normal_flip_from_form(form: cgi.FieldStorage) -> bool:
+    return normal_flip_from_values(form.getfirst("normal_mode", ""), form.getfirst("flip_g", "0"))
 
 
 def clamp_float(value: float, low: float, high: float) -> float:
@@ -6778,7 +6983,6 @@ def normalized_output_format(value: object, allow_keep: bool = True, fallback: s
 
 
 WORKFLOW_PREVIEW_UNSUPPORTED_LABELS = {
-    "normal": "法线/黑白调整",
     "pbr": "PBR辅助生成",
     "split": "通道拆分",
     "merge": "通道合并/打包",
@@ -6906,6 +7110,55 @@ def workflow_apply_export_step(items: list[dict[str, object]], options: dict[str
         item["quality"] = quality
         item["lossless"] = lossless
         item["notes"] = [*item.get("notes", []), f"导出 {output_format.upper()}"]
+
+
+def workflow_apply_normal_step(items: list[dict[str, object]], options: dict[str, object]) -> None:
+    strength_mode = str(options.get("strength_mode", "normal")).strip().lower()
+    if strength_mode == "roughness":
+        strength = clamp_float(float(options.get("strength", 1.0)), 0.0, 2.0)
+        contrast = clamp_float(float(options.get("contrast", 1.0)), 0.0, 3.0)
+        bias = clamp_float(float(options.get("bias", 0.0)), -1.0, 1.0)
+        black = clamp_float(float(options.get("black", 0.0)), 0.0, 0.95)
+        white = clamp_float(float(options.get("white", 1.0)), 0.05, 1.0)
+        gamma = clamp_float(float(options.get("gamma", 1.0)), 0.2, 3.0)
+        curve = clamp_float(float(options.get("curve", 0.0)), -1.0, 1.0)
+        invert = bool(options.get("invert", False))
+        output_format = normalized_output_format(options.get("format", "keep"), allow_keep=True, fallback="keep")
+        for item in items:
+            item["image_ops"] = [
+                *item.get("image_ops", []),
+                {
+                    "op": "roughness",
+                    "strength": strength,
+                    "contrast": contrast,
+                    "bias": bias,
+                    "black": black,
+                    "white": white,
+                    "gamma": gamma,
+                    "curve": curve,
+                    "invert": invert,
+                },
+            ]
+            if output_format != "keep":
+                item["ext"] = output_format
+            item["notes"] = [
+                *item.get("notes", []),
+                f"黑白/粗糙度 强度 {strength:g} 对比 {contrast:g} 色阶 {black:g}-{white:g} Gamma {gamma:g} 曲线 {curve:g}",
+            ]
+        return
+
+    strength = clamp_float(float(options.get("strength", 1.5)), 0.0, 4.0)
+    flip_g = normal_flip_from_values(options.get("normal_mode", ""), options.get("flip_g", False))
+    normal_label = "DirectX / DX" if flip_g else "OpenGL"
+    output_format = normalized_output_format(options.get("format", "keep"), allow_keep=True, fallback="keep")
+    for item in items:
+        item["image_ops"] = [
+            *item.get("image_ops", []),
+            {"op": "normal", "strength": strength, "flip_g": flip_g},
+        ]
+        if output_format != "keep":
+            item["ext"] = output_format
+        item["notes"] = [*item.get("notes", []), f"法线 {normal_label} 强度 {strength:g}"]
 
 
 def workflow_crop_output_stem(
@@ -7068,6 +7321,8 @@ def workflow_output_items(
             items = workflow_resize_items(items, options)
         elif step_type == "crop":
             items = workflow_crop_items(items, options)
+        elif step_type == "normal":
+            workflow_apply_normal_step(items, options)
         elif step_type == "export":
             workflow_apply_export_step(items, options)
         elif step_type == "rename":
@@ -7175,6 +7430,7 @@ def save_workflow_item(item: dict[str, object], source: Path, destination: Path,
 
     with Image.open(source) as opened:
         image = ImageOps.exif_transpose(opened)
+        source_had_alpha = core.image_has_alpha(image)
         icc_profile = opened.info.get("icc_profile")
 
     for operation in image_ops:
@@ -7189,6 +7445,24 @@ def save_workflow_item(item: dict[str, object], source: Path, destination: Path,
             crop = operation.get("crop", {})
             if isinstance(crop, dict):
                 image = image.crop(crop_pixel_box(image.size, crop))
+        elif op_type == "normal":
+            strength = clamp_float(float(operation.get("strength", 1.5)), 0.0, 4.0)
+            flip_g = bool(operation.get("flip_g", False))
+            image = adjusted_normal_image(image, strength, flip_g)
+            if core.normalize_channel_mode(channel_mode) == "auto" and not source_had_alpha:
+                image = image.convert("RGB")
+        elif op_type == "roughness":
+            image = adjusted_roughness_image(
+                image,
+                clamp_float(float(operation.get("strength", 1.0)), 0.0, 2.0),
+                clamp_float(float(operation.get("contrast", 1.0)), 0.0, 3.0),
+                clamp_float(float(operation.get("bias", 0.0)), -1.0, 1.0),
+                bool(operation.get("invert", False)),
+                clamp_float(float(operation.get("black", 0.0)), 0.0, 0.95),
+                clamp_float(float(operation.get("white", 1.0)), 0.05, 1.0),
+                clamp_float(float(operation.get("gamma", 1.0)), 0.2, 3.0),
+                clamp_float(float(operation.get("curve", 0.0)), -1.0, 1.0),
+            )
 
     if not image_ops and item.get("resize_applied"):
         size = item.get("size", image.size)
