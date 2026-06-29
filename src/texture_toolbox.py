@@ -49,6 +49,7 @@ APP_ROOT = app_root()
 ASSETS_DIR = APP_ROOT / "assets"
 DEFAULT_OUTPUT_DIR = APP_ROOT / "output"
 WORKFLOW_TEMPLATE_DIR = APP_ROOT / "workflow_templates"
+WORKFLOW_HISTORY_PATH = APP_ROOT / "workflow_history.json"
 UPLOAD_ROOT = APP_ROOT / ".texture_toolbox_uploads"
 
 
@@ -422,6 +423,44 @@ h1 { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: 0; }
   min-width: 30px;
   padding: 0 8px;
   font-size: 12px;
+}
+.workflow-history-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.workflow-history-card {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-limited);
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg));
+}
+.workflow-history-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+.workflow-history-title {
+  min-width: 0;
+  font-weight: 650;
+}
+.workflow-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.workflow-history-actions button {
+  height: 28px;
+  min-width: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.workflow-history-meta {
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.55;
 }
 .workflow-detail {
   margin-top: 10px;
@@ -2141,6 +2180,14 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <progress id="workflow-run-progress" max="100" value="0"></progress>
           <div id="workflow-run-status" class="run-status muted">等待执行。</div>
         </div>
+        <div class="workflow-actions">
+          <button id="workflow-history-refresh" class="secondary" type="button">刷新执行历史</button>
+          <button id="workflow-history-clear" class="secondary" type="button">清空执行历史</button>
+        </div>
+        <div id="workflow-history-info" class="muted">这里会记录最近执行过的工作流，方便回看并载入当时的步骤。</div>
+        <div id="workflow-history-list" class="workflow-history-list">
+          <div class="workflow-empty">尚无执行历史。</div>
+        </div>
         <div class="notice" style="margin-top:14px;">工作流 Beta 当前可真实导出：图片裁切、法线/黑白调整、通道拆分、通道合并、缩放、格式与压缩、命名规则。PBR 仍保留在快速工具模式。</div>
       </div>
     </div>
@@ -2313,6 +2360,10 @@ const workflowRunButton = document.getElementById("workflow-run");
 const workflowRunProgressWrap = document.getElementById("workflow-run-progress-wrap");
 const workflowRunProgress = document.getElementById("workflow-run-progress");
 const workflowRunStatus = document.getElementById("workflow-run-status");
+const workflowHistoryRefresh = document.getElementById("workflow-history-refresh");
+const workflowHistoryClear = document.getElementById("workflow-history-clear");
+const workflowHistoryInfo = document.getElementById("workflow-history-info");
+const workflowHistoryList = document.getElementById("workflow-history-list");
 const drop = document.getElementById("drop");
 const picker = document.getElementById("picker");
 const filesBox = document.getElementById("files");
@@ -2464,6 +2515,7 @@ let workflowSelectedStepId = null;
 let workflowStepSerial = 1;
 let workflowStepCompact = false;
 let workflowTemplateLibrary = [];
+let workflowHistoryItems = [];
 const settingsKey = "texture-toolbox-settings-v4";
 const memoKey = "texcat-memo-v1";
 const defaultUiSettings = { tone: "dark", scheme: "red", radius: 1 };
@@ -4574,6 +4626,101 @@ async function deleteSelectedWorkflowTemplate() {
     workflowTemplateDelete.disabled = false;
   }
 }
+function renderWorkflowHistory() {
+  if (!workflowHistoryList || !workflowHistoryInfo) return;
+  workflowHistoryList.innerHTML = "";
+  if (!workflowHistoryItems.length) {
+    const empty = document.createElement("div");
+    empty.className = "workflow-empty";
+    empty.textContent = "尚无执行历史。执行过一次工作流后，这里会记录最近流程。";
+    workflowHistoryList.appendChild(empty);
+    workflowHistoryInfo.textContent = "这里会记录最近执行过的工作流，方便回看并载入当时的步骤。";
+    workflowHistoryClear.disabled = true;
+    return;
+  }
+  workflowHistoryInfo.textContent = `最近保留 ${workflowHistoryItems.length} 条工作流执行历史。`;
+  workflowHistoryClear.disabled = false;
+  workflowHistoryItems.forEach(item => {
+    const card = document.createElement("div");
+    card.className = "workflow-history-card";
+    const head = document.createElement("div");
+    head.className = "workflow-history-head";
+    const title = document.createElement("div");
+    title.className = "workflow-history-title";
+    title.textContent = `${item.run_at || "未知时间"} | ${item.output || "未知输出位置"}`;
+    const actions = document.createElement("div");
+    actions.className = "workflow-history-actions";
+    const load = document.createElement("button");
+    load.className = "secondary";
+    load.type = "button";
+    load.textContent = "载入步骤";
+    load.onclick = () => {
+      applyWorkflowRawSteps(item.workflow?.steps, "replace", `执行历史「${item.run_at || "未命名"}」`);
+      workflowStatus(`已载入执行历史：${item.run_at || "未命名"}。`);
+    };
+    const append = document.createElement("button");
+    append.className = "secondary";
+    append.type = "button";
+    append.textContent = "追加步骤";
+    append.onclick = () => {
+      applyWorkflowRawSteps(item.workflow?.steps, "append", `执行历史「${item.run_at || "未命名"}」`);
+      workflowStatus(`已追加执行历史：${item.run_at || "未命名"}。`);
+    };
+    actions.appendChild(load);
+    actions.appendChild(append);
+    head.appendChild(title);
+    head.appendChild(actions);
+    const meta = document.createElement("div");
+    meta.className = "workflow-history-meta";
+    const labels = Array.isArray(item.labels) && item.labels.length ? item.labels.join(" / ") : "未记录步骤摘要";
+    const outputPath = item.output_path ? ` | 输出路径 ${item.output_path}` : "";
+    meta.textContent = `输入 ${item.input_count || 0} 张 | 输出 ${item.output_count || 0} 项 | 步骤 ${item.step_count || 0}（启用 ${item.active_step_count || 0}） | 冲突策略 ${item.conflict_action || "cancel"} | ${labels}${outputPath}`;
+    card.appendChild(head);
+    card.appendChild(meta);
+    workflowHistoryList.appendChild(card);
+  });
+}
+async function refreshWorkflowHistory(silent = false) {
+  if (!workflowHistoryList) return;
+  if (!silent && workflowHistoryInfo) workflowHistoryInfo.textContent = "正在读取执行历史...";
+  try {
+    const response = await fetch("/workflow-history");
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "读取执行历史失败");
+    workflowHistoryItems = Array.isArray(result.items) ? result.items : [];
+    renderWorkflowHistory();
+    if (!silent) workflowStatus(`已读取工作流执行历史：${workflowHistoryItems.length} 条。`);
+  } catch (error) {
+    workflowHistoryItems = [];
+    renderWorkflowHistory();
+    workflowHistoryInfo.textContent = `执行历史读取失败：${error.message}`;
+    if (!silent) {
+      workflowStatus(`执行历史读取失败：${error.message}`);
+      log(`工作流执行历史读取失败：${error.message}`);
+    }
+  }
+}
+async function clearWorkflowHistoryEntries() {
+  if (!workflowHistoryItems.length) {
+    workflowStatus("当前没有可清空的工作流执行历史。");
+    return;
+  }
+  if (!window.confirm("确定清空当前所有工作流执行历史吗？")) return;
+  workflowHistoryClear.disabled = true;
+  try {
+    const response = await fetch("/workflow-history-clear", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "清空执行历史失败");
+    workflowHistoryItems = [];
+    renderWorkflowHistory();
+    workflowStatus(`已清空工作流执行历史：${result.removed || 0} 条。`);
+  } catch (error) {
+    workflowStatus(`清空执行历史失败：${error.message}`);
+    log(`工作流执行历史清空失败：${error.message}`);
+  } finally {
+    workflowHistoryClear.disabled = false;
+  }
+}
 function appendWorkflowCommon(form) {
   form.append("input_mode", inputMode());
   form.append("input", inputDir.value);
@@ -6339,6 +6486,8 @@ workflowTemplateImportInput.onchange = () => {
   importWorkflowTemplateFile(workflowTemplateImportInput.files && workflowTemplateImportInput.files[0]);
   workflowTemplateImportInput.value = "";
 };
+workflowHistoryRefresh.onclick = () => refreshWorkflowHistory(false);
+workflowHistoryClear.onclick = clearWorkflowHistoryEntries;
 workflowStepPreviewRun.onclick = previewWorkflowStepResult;
 workflowPreviewRun.onclick = previewWorkflowPlan;
 document.querySelectorAll(".tab").forEach(tab => {
@@ -6534,6 +6683,7 @@ workflowRunButton.onclick = async () => {
     log(`工作流完成，输出目录：${result.output}`);
     setWorkflowRunProgress(100, `工作流导出完成：${result.output}`, "ok");
     workflowStatus(`工作流执行完成：${result.output}`);
+    await refreshWorkflowHistory(true);
   } catch (error) {
     log(`工作流失败：${error.message}`);
     setWorkflowRunProgress(100, `工作流导出失败：${error.message}`, "error");
@@ -6612,6 +6762,8 @@ renderCropCards();
 renderWorkflowShell();
 renderWorkflowTemplatePanel();
 refreshWorkflowTemplates(true);
+renderWorkflowHistory();
+refreshWorkflowHistory(true);
 updateNormalStrengthLabel();
 updateRoughnessLabels();
 updateCompressQualityLabel();
@@ -6833,6 +6985,81 @@ def delete_workflow_template(value: str) -> dict[str, object]:
     meta = workflow_template_meta(path)
     path.unlink()
     return meta
+
+
+def read_workflow_history() -> list[dict[str, object]]:
+    ensure_default_dirs()
+    if not WORKFLOW_HISTORY_PATH.is_file():
+        return []
+    try:
+        raw = json.loads(WORKFLOW_HISTORY_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    items: list[dict[str, object]] = []
+    for entry in raw:
+        if isinstance(entry, dict):
+            items.append(entry)
+    return items
+
+
+def write_workflow_history(items: list[dict[str, object]]) -> None:
+    ensure_default_dirs()
+    WORKFLOW_HISTORY_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def workflow_history_entry(
+    payload: dict[str, object],
+    output_dir: Path,
+    output_label: str,
+    input_count: int,
+    output_count: int,
+    conflict_action: str,
+) -> dict[str, object]:
+    steps = workflow_steps_from_payload(payload)
+    active_steps = [step for step in steps if step.get("enabled", True)]
+    raw_steps = payload.get("steps", [])
+    labels: list[str] = []
+    if isinstance(raw_steps, list):
+        for step in raw_steps[:6]:
+            if not isinstance(step, dict):
+                continue
+            label = str(step.get("label") or step.get("type") or "").strip()
+            if label:
+                labels.append(label)
+    return {
+        "id": f"workflow-history-{time.time_ns()}",
+        "run_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "output": output_label,
+        "output_path": str(output_dir),
+        "input_count": int(input_count),
+        "output_count": int(output_count),
+        "step_count": len(steps),
+        "active_step_count": len(active_steps),
+        "conflict_action": str(conflict_action or "cancel"),
+        "labels": labels,
+        "workflow": {
+            "version": payload.get("version", 1),
+            "app": payload.get("app", "TexCat"),
+            "mode": payload.get("mode", "workflow-beta"),
+            "steps": payload.get("steps", []),
+        },
+    }
+
+
+def append_workflow_history(entry: dict[str, object], limit: int = 24) -> list[dict[str, object]]:
+    items = [entry, *read_workflow_history()]
+    trimmed = items[: max(1, int(limit))]
+    write_workflow_history(trimmed)
+    return trimmed
+
+
+def clear_workflow_history() -> int:
+    items = read_workflow_history()
+    if WORKFLOW_HISTORY_PATH.exists():
+        WORKFLOW_HISTORY_PATH.unlink()
+    return len(items)
 
 
 def uploaded_files(form: cgi.FieldStorage) -> list[cgi.FieldStorage]:
@@ -9449,6 +9676,13 @@ class ToolboxHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
+        if parsed.path == "/workflow-history":
+            mark_browser_alive(self.server)
+            try:
+                self.send_json(200, {"ok": True, "items": read_workflow_history()})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if parsed.path == "/list-input":
             mark_browser_alive(self.server)
             self.handle_list_input(parsed.query)
@@ -9566,6 +9800,14 @@ class ToolboxHandler(BaseHTTPRequestHandler):
                 self.handle_delete_workflow_template()
             except ValueError as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if path == "/workflow-history-clear":
+            mark_browser_alive(self.server)
+            try:
+                removed = clear_workflow_history()
+                self.send_json(200, {"ok": True, "removed": removed})
             except Exception as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
@@ -9977,6 +10219,7 @@ class ToolboxHandler(BaseHTTPRequestHandler):
         conflict_action = form.getfirst("conflict_action", "cancel")
         name_suffix = conflict_name_suffix(form)
         log_lines: list[str] = []
+        history_entry_data: dict[str, object] | None = None
 
         try:
             planned = planned_output_paths(paths, output_dir, form, name_suffix)
@@ -10123,13 +10366,22 @@ class ToolboxHandler(BaseHTTPRequestHandler):
                     notes = str(item.get("notes_text", "")).strip()
                     note_text = f" [工作流: {notes}]" if notes else ""
                     log_lines.append(f"{workflow_item_source_label(item)} -> {report.path.name}{note_text}" + report_summary([report]))
+                history_entry_data = workflow_history_entry(
+                    payload,
+                    output_dir,
+                    output_label_from_form(form, output_dir),
+                    len(paths),
+                    len(workflow_items),
+                    str(conflict_action),
+                )
+                append_workflow_history(history_entry_data)
             else:
                 raise ValueError(f"Unknown tool: {tool}")
         finally:
             if upload_dir is not None:
                 cleanup_uploads(upload_dir)
 
-        self.send_json(200, {"ok": True, "output": output_label_from_form(form, output_dir), "log": log_lines})
+        self.send_json(200, {"ok": True, "output": output_label_from_form(form, output_dir), "log": log_lines, "history": history_entry_data})
 
 
 def run_web(port: int = 8765) -> int:
