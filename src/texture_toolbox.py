@@ -4005,6 +4005,8 @@ function renderWorkflowStepPreview(result) {
       const img = document.createElement("img");
       img.alt = item.name || "步骤预览";
       setPreviewImage(img, item.preview || "");
+      img.title = "点击放大预览";
+      img.onclick = () => openCropZoom(item.preview || "");
       const caption = document.createElement("div");
       caption.className = "preview-caption";
       const title = document.createElement("strong");
@@ -4308,6 +4310,8 @@ function renderChannelPreview(result) {
     const img = document.createElement("img");
     img.src = item.data_url;
     img.alt = item.label;
+    img.title = "点击放大预览";
+    img.onclick = () => openCropZoom(item.data_url || "");
     const caption = document.createElement("div");
     caption.className = "preview-caption";
     const title = document.createElement("strong");
