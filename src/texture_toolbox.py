@@ -48,12 +48,14 @@ def app_root() -> Path:
 APP_ROOT = app_root()
 ASSETS_DIR = APP_ROOT / "assets"
 DEFAULT_OUTPUT_DIR = APP_ROOT / "output"
+WORKFLOW_TEMPLATE_DIR = APP_ROOT / "workflow_templates"
 UPLOAD_ROOT = APP_ROOT / ".texture_toolbox_uploads"
 
 
 def ensure_default_dirs() -> None:
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    WORKFLOW_TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def clear_default_output_dir() -> int:
@@ -360,6 +362,19 @@ h1 { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: 0; }
 }
 .workflow-preset-step span:first-child {
   color: var(--muted);
+}
+.workflow-template-info {
+  min-height: 38px;
+  line-height: 1.55;
+}
+.workflow-template-select-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+.workflow-template-select-wrap button {
+  min-width: 92px;
 }
 .workflow-step-card {
   padding: 12px 0;
@@ -2031,6 +2046,26 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <button id="workflow-load" class="secondary" type="button">载入工作流 JSON</button>
           <input id="workflow-load-input" type="file" accept=".json,application/json" hidden>
         </div>
+        <div class="workflow-param-card">
+          <div class="workflow-param-grid">
+            <label>模板名称
+              <input id="workflow-template-name" type="text" placeholder="例如：角色贴图导出流程">
+            </label>
+            <div class="workflow-template-select-wrap">
+              <label>已保存模板
+                <select id="workflow-template-select"></select>
+              </label>
+              <button id="workflow-template-refresh" class="secondary" type="button">刷新模板库</button>
+            </div>
+          </div>
+          <div id="workflow-template-info" class="workflow-template-info muted">把当前工作流保存成自定义模板，后面可以一键载入或追加复用。</div>
+          <div class="workflow-actions">
+            <button id="workflow-template-save" class="secondary" type="button">保存当前为模板</button>
+            <button id="workflow-template-load" class="secondary" type="button">套用模板</button>
+            <button id="workflow-template-append" class="secondary" type="button">追加模板</button>
+            <button id="workflow-template-delete" class="secondary" type="button">删除模板</button>
+          </div>
+        </div>
         <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：图片裁切 / 法线与黑白调整 / 通道拆分 / 通道合并 / 缩放 / 格式与压缩 / 命名规则；PBR 仍先保留在快速工具模式。</div>
       </div>
       <div class="workflow-column">
@@ -2202,6 +2237,14 @@ const workflowStepList = document.getElementById("workflow-step-list");
 const workflowSave = document.getElementById("workflow-save");
 const workflowLoad = document.getElementById("workflow-load");
 const workflowLoadInput = document.getElementById("workflow-load-input");
+const workflowTemplateName = document.getElementById("workflow-template-name");
+const workflowTemplateSelect = document.getElementById("workflow-template-select");
+const workflowTemplateInfo = document.getElementById("workflow-template-info");
+const workflowTemplateRefresh = document.getElementById("workflow-template-refresh");
+const workflowTemplateSave = document.getElementById("workflow-template-save");
+const workflowTemplateLoad = document.getElementById("workflow-template-load");
+const workflowTemplateAppend = document.getElementById("workflow-template-append");
+const workflowTemplateDelete = document.getElementById("workflow-template-delete");
 const workflowJsonStatus = document.getElementById("workflow-json-status");
 const workflowDetailTitle = document.getElementById("workflow-detail-title");
 const workflowDetailBody = document.getElementById("workflow-detail-body");
@@ -2370,6 +2413,7 @@ let cropLastPointerTime = 0;
 let workflowSteps = [];
 let workflowSelectedStepId = null;
 let workflowStepSerial = 1;
+let workflowTemplateLibrary = [];
 const settingsKey = "texture-toolbox-settings-v4";
 const memoKey = "texcat-memo-v1";
 const defaultUiSettings = { tone: "dark", scheme: "red", radius: 1 };
@@ -4152,23 +4196,174 @@ function saveWorkflowJson() {
   URL.revokeObjectURL(url);
   workflowStatus(`已导出工作流 JSON：${payload.steps.length} 个步骤。`);
 }
+function applyWorkflowRawSteps(rawSteps, mode = "replace", sourceLabel = "工作流 JSON") {
+  const steps = Array.isArray(rawSteps)
+    ? rawSteps.map((step, index) => normalizeWorkflowStep(step && typeof step === "object" ? { ...step, id: "" } : step, index))
+    : [];
+  if (!steps.length) throw new Error(`${sourceLabel}里没有可用步骤`);
+  const priorCount = workflowSteps.length;
+  workflowStepSerial += steps.length + 1;
+  if (mode === "append") {
+    workflowSteps.push(...steps);
+    workflowSelectedStepId = workflowSteps[priorCount]?.id || steps[0].id;
+    workflowStatus(`已追加${sourceLabel}：新增 ${steps.length} 个步骤。`);
+  } else {
+    workflowSteps = steps;
+    workflowSelectedStepId = workflowSteps[0]?.id || null;
+    workflowStatus(`已载入${sourceLabel}：${priorCount ? `替换原有 ${priorCount} 个步骤并` : ""}生成 ${steps.length} 个步骤。`);
+  }
+  renderWorkflowShell();
+}
 function loadWorkflowJsonFile(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
     try {
       const data = JSON.parse(String(reader.result || "{}"));
-      const steps = Array.isArray(data.steps) ? data.steps.map(normalizeWorkflowStep) : [];
-      workflowSteps = steps;
-      workflowSelectedStepId = workflowSteps[0]?.id || null;
-      workflowStepSerial += workflowSteps.length + 1;
-      workflowStatus(`已载入工作流 JSON：${workflowSteps.length} 个步骤。`);
-      renderWorkflowShell();
+      applyWorkflowRawSteps(data.steps, "replace", "工作流 JSON");
     } catch (error) {
       workflowStatus(`载入失败：${error.message}`);
     }
   };
   reader.readAsText(file, "utf-8");
+}
+function formatWorkflowTemplateSavedAt(value) {
+  const text = String(value || "").trim();
+  if (!text) return "未记录保存时间";
+  const date = new Date(text.replace(" ", "T"));
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+function selectedWorkflowTemplateMeta() {
+  return workflowTemplateLibrary.find(item => item.key === workflowTemplateSelect.value) || null;
+}
+function renderWorkflowTemplatePanel() {
+  if (!workflowTemplateSelect || !workflowTemplateInfo) return;
+  const prior = workflowTemplateSelect.value;
+  workflowTemplateSelect.innerHTML = "";
+  if (!workflowTemplateLibrary.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "暂无已保存模板";
+    workflowTemplateSelect.appendChild(option);
+  } else {
+    workflowTemplateLibrary.forEach(item => {
+      const option = document.createElement("option");
+      option.value = item.key;
+      option.textContent = item.name;
+      workflowTemplateSelect.appendChild(option);
+    });
+    const matched = workflowTemplateLibrary.some(item => item.key === prior);
+    workflowTemplateSelect.value = matched ? prior : workflowTemplateLibrary[0].key;
+  }
+  const meta = selectedWorkflowTemplateMeta();
+  workflowTemplateLoad.disabled = !meta;
+  workflowTemplateAppend.disabled = !meta;
+  workflowTemplateDelete.disabled = !meta;
+  if (!meta) {
+    workflowTemplateInfo.textContent = "把当前工作流保存成自定义模板，后面可以一键载入或追加复用。";
+    return;
+  }
+  const labels = Array.isArray(meta.labels) && meta.labels.length ? meta.labels.join(" / ") : "未记录步骤摘要";
+  workflowTemplateInfo.textContent = `${meta.step_count || 0} 个步骤 | ${formatWorkflowTemplateSavedAt(meta.saved_at)} | ${labels}`;
+}
+async function refreshWorkflowTemplates(silent = false, preferredKey = "") {
+  if (!workflowTemplateSelect) return;
+  if (!silent && workflowTemplateInfo) workflowTemplateInfo.textContent = "正在读取模板库...";
+  try {
+    const response = await fetch("/workflow-templates");
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "读取模板库失败");
+    workflowTemplateLibrary = Array.isArray(result.items) ? result.items : [];
+    renderWorkflowTemplatePanel();
+    if (preferredKey && workflowTemplateLibrary.some(item => item.key === preferredKey)) {
+      workflowTemplateSelect.value = preferredKey;
+      renderWorkflowTemplatePanel();
+    }
+    if (!silent) workflowStatus(`已读取工作流模板库：${workflowTemplateLibrary.length} 个模板。`);
+  } catch (error) {
+    workflowTemplateLibrary = [];
+    renderWorkflowTemplatePanel();
+    workflowTemplateInfo.textContent = `模板库读取失败：${error.message}`;
+    if (!silent) {
+      workflowStatus(`模板库读取失败：${error.message}`);
+      log(`工作流模板库读取失败：${error.message}`);
+    }
+  }
+}
+async function saveCurrentWorkflowTemplate() {
+  const name = String(workflowTemplateName.value || "").trim();
+  if (!name) {
+    workflowStatus("请输入工作流模板名称。");
+    workflowTemplateName.focus();
+    return;
+  }
+  if (!workflowSteps.length) {
+    workflowStatus("请先添加至少一个工作流步骤后再保存模板。");
+    return;
+  }
+  workflowTemplateSave.disabled = true;
+  try {
+    const form = new FormData();
+    form.append("name", name);
+    form.append("workflow", JSON.stringify(workflowPayload()));
+    const response = await fetch("/workflow-template-save", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "保存模板失败");
+    workflowTemplateName.value = result.template?.name || name;
+    await refreshWorkflowTemplates(true, result.template?.key || "");
+    workflowStatus(`${result.updated ? "已更新" : "已保存"}工作流模板：${result.template?.name || name}。`);
+  } catch (error) {
+    workflowStatus(`保存模板失败：${error.message}`);
+    log(`工作流模板保存失败：${error.message}`);
+  } finally {
+    workflowTemplateSave.disabled = false;
+  }
+}
+async function applyWorkflowTemplate(mode = "replace") {
+  const meta = selectedWorkflowTemplateMeta();
+  if (!meta) {
+    workflowStatus("请先选择一个已保存的工作流模板。");
+    return;
+  }
+  const button = mode === "append" ? workflowTemplateAppend : workflowTemplateLoad;
+  button.disabled = true;
+  try {
+    const form = new FormData();
+    form.append("name", meta.key);
+    const response = await fetch("/workflow-template-load", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "读取模板失败");
+    applyWorkflowRawSteps(result.template?.steps, mode, `模板「${result.template?.name || meta.name}」`);
+  } catch (error) {
+    workflowStatus(`${mode === "append" ? "追加" : "套用"}模板失败：${error.message}`);
+    log(`工作流模板读取失败：${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
+}
+async function deleteSelectedWorkflowTemplate() {
+  const meta = selectedWorkflowTemplateMeta();
+  if (!meta) {
+    workflowStatus("请先选择一个已保存的工作流模板。");
+    return;
+  }
+  if (!window.confirm(`确定删除模板“${meta.name}”吗？`)) return;
+  workflowTemplateDelete.disabled = true;
+  try {
+    const form = new FormData();
+    form.append("name", meta.key);
+    const response = await fetch("/workflow-template-delete", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "删除模板失败");
+    await refreshWorkflowTemplates(true);
+    workflowStatus(`已删除工作流模板：${result.template?.name || meta.name}。`);
+  } catch (error) {
+    workflowStatus(`删除模板失败：${error.message}`);
+    log(`工作流模板删除失败：${error.message}`);
+  } finally {
+    workflowTemplateDelete.disabled = false;
+  }
 }
 function appendWorkflowCommon(form) {
   form.append("input_mode", inputMode());
@@ -5908,6 +6103,12 @@ workflowLoadInput.onchange = () => {
   loadWorkflowJsonFile(workflowLoadInput.files && workflowLoadInput.files[0]);
   workflowLoadInput.value = "";
 };
+workflowTemplateSelect.onchange = renderWorkflowTemplatePanel;
+workflowTemplateRefresh.onclick = () => refreshWorkflowTemplates(false, workflowTemplateSelect.value);
+workflowTemplateSave.onclick = saveCurrentWorkflowTemplate;
+workflowTemplateLoad.onclick = () => applyWorkflowTemplate("replace");
+workflowTemplateAppend.onclick = () => applyWorkflowTemplate("append");
+workflowTemplateDelete.onclick = deleteSelectedWorkflowTemplate;
 workflowStepPreviewRun.onclick = previewWorkflowStepResult;
 workflowPreviewRun.onclick = previewWorkflowPlan;
 document.querySelectorAll(".tab").forEach(tab => {
@@ -6179,6 +6380,8 @@ updateOutputMode();
 updateChannelPreviewVisibility();
 renderCropCards();
 renderWorkflowShell();
+renderWorkflowTemplatePanel();
+refreshWorkflowTemplates(true);
 updateNormalStrengthLabel();
 updateRoughnessLabels();
 updateCompressQualityLabel();
@@ -6207,6 +6410,111 @@ def safe_stem(value: str, fallback: str = "texture") -> str:
 
 def stem_with_suffix(stem: str, name_suffix: str) -> str:
     return f"{stem}{name_suffix}" if name_suffix else stem
+
+
+def workflow_template_key(value: str) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    key = safe_stem(text, "workflow_template").strip().rstrip(" .")
+    if len(key) > 80:
+        key = key[:80].rstrip(" ._")
+    return key or "workflow_template"
+
+
+def workflow_template_path(value: str) -> Path:
+    ensure_default_dirs()
+    return WORKFLOW_TEMPLATE_DIR / f"{workflow_template_key(value)}.json"
+
+
+def workflow_template_steps(data: dict[str, object]) -> list[dict[str, object]]:
+    steps = workflow_steps_from_payload(data)
+    if not steps:
+        raise ValueError("工作流模板里没有可用步骤")
+    return steps
+
+
+def workflow_template_meta(path: Path, data: dict[str, object] | None = None) -> dict[str, object]:
+    raw = data
+    if raw is None:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("工作流模板格式无效")
+    step_count = len(workflow_steps_from_payload(raw))
+    steps = raw.get("steps", [])
+    labels: list[str] = []
+    if isinstance(steps, list):
+        for step in steps[:4]:
+            if not isinstance(step, dict):
+                continue
+            label = str(step.get("label") or step.get("type") or "").strip()
+            if label:
+                labels.append(label)
+    saved_at = str(raw.get("saved_at", "")).strip() or time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(path.stat().st_mtime))
+    return {
+        "key": path.stem,
+        "name": str(raw.get("name", "")).strip() or path.stem,
+        "step_count": step_count,
+        "labels": labels,
+        "saved_at": saved_at,
+        "file": path.name,
+    }
+
+
+def list_workflow_templates() -> list[dict[str, object]]:
+    ensure_default_dirs()
+    items: list[dict[str, object]] = []
+    for path in sorted(WORKFLOW_TEMPLATE_DIR.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        try:
+            items.append(workflow_template_meta(path))
+        except Exception:
+            continue
+    return items
+
+
+def save_workflow_template(name: str, payload: dict[str, object]) -> tuple[dict[str, object], bool]:
+    display_name = re.sub(r"\s+", " ", str(name or "").strip())
+    if not display_name:
+        raise ValueError("模板名称不能为空")
+    steps = payload.get("steps", [])
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("当前工作流还没有步骤，无法保存模板")
+    workflow_template_steps({"steps": steps})
+    path = workflow_template_path(display_name)
+    existed = path.exists()
+    template_payload = {
+        "version": 1,
+        "app": "TexCat",
+        "kind": "workflow-template",
+        "name": display_name,
+        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "steps": steps,
+    }
+    path.write_text(json.dumps(template_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return workflow_template_meta(path, template_payload), existed
+
+
+def load_workflow_template(value: str) -> dict[str, object]:
+    name = str(value or "").strip()
+    if not name:
+        raise ValueError("缺少工作流模板名称")
+    path = workflow_template_path(name)
+    if not path.is_file():
+        raise ValueError("没有找到所选工作流模板")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("工作流模板格式无效")
+    workflow_template_steps(data)
+    data["name"] = str(data.get("name", "")).strip() or path.stem
+    data["key"] = path.stem
+    return data
+
+
+def delete_workflow_template(value: str) -> dict[str, object]:
+    path = workflow_template_path(value)
+    if not path.is_file():
+        raise ValueError("没有找到所选工作流模板")
+    meta = workflow_template_meta(path)
+    path.unlink()
+    return meta
 
 
 def uploaded_files(form: cgi.FieldStorage) -> list[cgi.FieldStorage]:
@@ -8816,6 +9124,13 @@ class ToolboxHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/assets/"):
             self.handle_asset(parsed.path)
             return
+        if parsed.path == "/workflow-templates":
+            mark_browser_alive(self.server)
+            try:
+                self.send_json(200, {"ok": True, "items": list_workflow_templates()})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if parsed.path == "/list-input":
             mark_browser_alive(self.server)
             self.handle_list_input(parsed.query)
@@ -8879,6 +9194,33 @@ class ToolboxHandler(BaseHTTPRequestHandler):
             mark_browser_alive(self.server)
             try:
                 self.handle_choose_output_dir()
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if path == "/workflow-template-save":
+            mark_browser_alive(self.server)
+            try:
+                self.handle_save_workflow_template()
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if path == "/workflow-template-load":
+            mark_browser_alive(self.server)
+            try:
+                self.handle_load_workflow_template()
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if path == "/workflow-template-delete":
+            mark_browser_alive(self.server)
+            try:
+                self.handle_delete_workflow_template()
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
             except Exception as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
@@ -9014,6 +9356,22 @@ class ToolboxHandler(BaseHTTPRequestHandler):
             self.send_json(200, {"ok": True, "cancelled": True})
             return
         self.send_json(200, {"ok": True, "cancelled": False, "path": str(selected)})
+
+    def handle_save_workflow_template(self) -> None:
+        form = self.parse_form()
+        payload = workflow_payload_from_form(form)
+        template, updated = save_workflow_template(str(form.getfirst("name", "")), payload)
+        self.send_json(200, {"ok": True, "template": template, "updated": updated})
+
+    def handle_load_workflow_template(self) -> None:
+        form = self.parse_form()
+        template = load_workflow_template(str(form.getfirst("name", "")))
+        self.send_json(200, {"ok": True, "template": template})
+
+    def handle_delete_workflow_template(self) -> None:
+        form = self.parse_form()
+        template = delete_workflow_template(str(form.getfirst("name", "")))
+        self.send_json(200, {"ok": True, "template": template})
 
     def handle_preview_channels(self) -> None:
         form = self.parse_form()
