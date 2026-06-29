@@ -1930,9 +1930,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     <div class="section-head">
       <div>
         <strong>工作流模式 Beta</strong>
-        <div class="muted">当前可真实执行：图片裁切、法线/黑白调整、缩放、格式与压缩、命名规则；其他步骤继续在 Beta 中迭代接入。</div>
+        <div class="muted">当前可真实执行：图片裁切、法线/黑白调整、通道拆分、缩放、格式与压缩、命名规则；其他步骤继续在 Beta 中迭代接入。</div>
       </div>
-      <span class="workflow-badge">阶段 6 / 调整执行链 Beta</span>
+      <span class="workflow-badge">阶段 7 / 拆分执行链 Beta</span>
     </div>
     <div class="workflow-grid">
       <div class="workflow-column">
@@ -1964,7 +1964,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <button id="workflow-load" class="secondary" type="button">载入工作流 JSON</button>
           <input id="workflow-load-input" type="file" accept=".json,application/json" hidden>
         </div>
-        <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：图片裁切 / 法线与黑白调整 / 缩放 / 格式与压缩 / 命名规则；其余步骤先保留结构和预览。</div>
+        <div id="workflow-json-status" class="workflow-json-status muted">当前可执行：图片裁切 / 法线与黑白调整 / 通道拆分 / 缩放 / 格式与压缩 / 命名规则；其余步骤先保留结构和预览。</div>
       </div>
       <div class="workflow-column">
         <div class="workflow-column-title">参数与输出摘要</div>
@@ -1993,7 +1993,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
           <progress id="workflow-run-progress" max="100" value="0"></progress>
           <div id="workflow-run-status" class="run-status muted">等待执行。</div>
         </div>
-        <div class="notice" style="margin-top:14px;">工作流 Beta 当前可真实导出：图片裁切、法线/黑白调整、缩放、格式与压缩、命名规则。通道拆分、通道合并会在后续阶段继续接入。</div>
+        <div class="notice" style="margin-top:14px;">工作流 Beta 当前可真实导出：图片裁切、法线/黑白调整、通道拆分、缩放、格式与压缩、命名规则。通道合并会在后续阶段继续接入。</div>
       </div>
     </div>
   </section>
@@ -2591,7 +2591,7 @@ const workflowStepDefinitions = {
   split: {
     label: "通道拆分",
     summary: "拆出 L/R/G/B/A 通道贴图。",
-    detail: "参数占位：启用通道、通道命名模板、输出格式。后续复用通道拆分模块。"
+    detail: "复用通道拆分模块的启用通道、命名模板和输出格式；拆分后可继续接后续缩放、压缩和命名步骤。"
   },
   merge: {
     label: "通道合并/打包",
@@ -2711,6 +2711,40 @@ function currentNormalWorkflowOptions() {
     invert: document.getElementById("roughness-invert").checked,
   });
 }
+function workflowDefaultSplitChannels() {
+  return {
+    l: { enabled: true, name: "{name}_L" },
+    r: { enabled: true, name: "{name}_R" },
+    g: { enabled: true, name: "{name}_G" },
+    b: { enabled: true, name: "{name}_B" },
+    a: { enabled: true, name: "{name}_A" },
+  };
+}
+function workflowNormalizeSplitChannels(value) {
+  const defaults = workflowDefaultSplitChannels();
+  const source = value && typeof value === "object" ? value : {};
+  const channels = {};
+  for (const key of ["l", "r", "g", "b", "a"]) {
+    const raw = source[key] && typeof source[key] === "object" ? source[key] : {};
+    channels[key] = {
+      enabled: raw.enabled !== false,
+      name: String(raw.name || defaults[key].name).trim() || defaults[key].name,
+    };
+  }
+  return channels;
+}
+function currentSplitWorkflowOptions() {
+  return workflowMergeOptions("split", {
+    format: document.getElementById("split-format").value || "png",
+    channels: {
+      l: { enabled: document.getElementById("split-l-enabled").checked, name: document.getElementById("split-l-name").value },
+      r: { enabled: document.getElementById("split-r-enabled").checked, name: document.getElementById("split-r-name").value },
+      g: { enabled: document.getElementById("split-g-enabled").checked, name: document.getElementById("split-g-name").value },
+      b: { enabled: document.getElementById("split-b-enabled").checked, name: document.getElementById("split-b-name").value },
+      a: { enabled: document.getElementById("split-a-enabled").checked, name: document.getElementById("split-a-name").value },
+    },
+  });
+}
 function workflowDefaultOptions(type) {
   if (type === "resize") {
     return { sizes: [], custom: "", profile: "detail", format: "keep", preserve: true, append_size_suffix: true };
@@ -2735,6 +2769,9 @@ function workflowDefaultOptions(type) {
       curve: 0.0,
       invert: false,
     };
+  }
+  if (type === "split") {
+    return { format: "png", channels: workflowDefaultSplitChannels() };
   }
   if (type === "rename") {
     return { format: "keep", steps: [workflowDefaultRenameStep()] };
@@ -2771,6 +2808,9 @@ function workflowMergeOptions(type, options) {
     merged.gamma = Math.max(0.2, Math.min(3, Number(merged.gamma) || 1));
     merged.curve = Math.max(-1, Math.min(1, Number(merged.curve) || 0));
     merged.invert = merged.invert === true;
+  } else if (type === "split") {
+    merged.format = merged.format === "keep" || workflowFormatValues.includes(merged.format) ? merged.format : "png";
+    merged.channels = workflowNormalizeSplitChannels(merged.channels);
   } else if (type === "export") {
     merged.format = workflowFormatValues.includes(merged.format) ? merged.format : "png";
     merged.quality = Math.max(80, Math.min(100, Math.round(Number(merged.quality) || 95)));
@@ -2809,6 +2849,7 @@ function workflowInitialOptions(type) {
     if (type === "resize") return currentResizeWorkflowOptions();
     if (type === "crop") return currentCropWorkflowOptions();
     if (type === "normal") return currentNormalWorkflowOptions();
+    if (type === "split") return currentSplitWorkflowOptions();
     if (type === "export") return currentExportWorkflowOptions();
     if (type === "rename") return currentRenameWorkflowOptions();
   } catch (_error) {
@@ -2867,6 +2908,11 @@ function workflowStepSummary(step) {
       return `黑白/粗糙度，强度 ${Number(options.strength).toFixed(1)}，对比 ${Number(options.contrast).toFixed(1)}，${formatText}`;
     }
     return `法线 ${options.normal_mode === "directx" ? "DirectX / DX" : "OpenGL"}，强度 ${Number(options.strength).toFixed(1)}，${formatText}`;
+  }
+  if (step.type === "split") {
+    const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
+    const enabled = Object.entries(options.channels || {}).filter(([, spec]) => spec && spec.enabled).map(([key]) => key.toUpperCase()).join(" / ") || "未启用";
+    return `${enabled}，${formatText}`;
   }
   if (step.type === "export") {
     const formatText = workflowFormatLabels[options.format] || options.format.toUpperCase();
@@ -3001,6 +3047,10 @@ function updateWorkflowSummary() {
       } else {
         counts = counts.map(count => count * multiplier);
       }
+    } else if (step.type === "split") {
+      const options = workflowMergeOptions("split", step.options);
+      const multiplier = Object.values(options.channels || {}).filter(spec => spec && spec.enabled).length;
+      counts = counts.map(count => count * multiplier);
     }
   }
   const estimatedOutputs = counts.reduce((sum, count) => sum + count, 0);
@@ -3357,6 +3407,75 @@ function renderWorkflowNormalDetail(step) {
   updateMode();
   workflowDetailBody.appendChild(card);
 }
+function renderWorkflowSplitDetail(step) {
+  step.options = workflowMergeOptions("split", step.options);
+  const options = step.options;
+  const card = document.createElement("div");
+  card.className = "workflow-param-card";
+  card.innerHTML = `
+    <div class="workflow-param-actions">
+      <button class="secondary" type="button" data-workflow-sync>读取当前通道拆分模块设置</button>
+      <span class="muted">先在快速工具模式里勾好通道和命名模板，再同步到工作流。</span>
+    </div>
+    <div class="workflow-param-grid">
+      <label>输出格式
+        <select data-workflow-format>${workflowFormatOptionHtml(options.format, true)}</select>
+      </label>
+    </div>
+    <div class="workflow-param-list" data-workflow-split-list></div>
+    <div class="muted">拆分步骤里的 {name} 会替换为当前流程中的文件名基础，{channel} 会替换为当前通道，{ext} 会替换为此步骤的输出格式。</div>
+  `;
+  const list = card.querySelector("[data-workflow-split-list]");
+  const formatSelect = card.querySelector("[data-workflow-format]");
+  const renderRows = () => {
+    list.innerHTML = "";
+    for (const [key, label] of [["l", "L"], ["r", "R"], ["g", "G"], ["b", "B"], ["a", "A"]]) {
+      const row = document.createElement("div");
+      const labelNode = document.createElement("span");
+      labelNode.textContent = `通道 ${label}`;
+      const fieldWrap = document.createElement("span");
+      fieldWrap.style.display = "inline-flex";
+      fieldWrap.style.gap = "10px";
+      fieldWrap.style.alignItems = "center";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = !!options.channels[key].enabled;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = options.channels[key].name;
+      input.style.minWidth = "220px";
+      const apply = () => {
+        step.options = workflowMergeOptions("split", {
+          ...step.options,
+          format: formatSelect.value,
+          channels: {
+            ...step.options.channels,
+            [key]: { enabled: checkbox.checked, name: input.value },
+          },
+        });
+        refreshWorkflowAfterOptionChange(step);
+      };
+      checkbox.onchange = apply;
+      input.oninput = apply;
+      fieldWrap.appendChild(checkbox);
+      fieldWrap.appendChild(input);
+      row.appendChild(labelNode);
+      row.appendChild(fieldWrap);
+      list.appendChild(row);
+    }
+  };
+  card.querySelector("[data-workflow-sync]").onclick = () => {
+    step.options = currentSplitWorkflowOptions();
+    workflowStatus("已读取当前通道拆分模块设置。");
+    renderWorkflowShell();
+  };
+  formatSelect.onchange = () => {
+    step.options = workflowMergeOptions("split", { ...step.options, format: formatSelect.value });
+    refreshWorkflowAfterOptionChange(step);
+  };
+  renderRows();
+  workflowDetailBody.appendChild(card);
+}
 function workflowRenameOpLabel(op) {
   return {
     replace: "查找替换",
@@ -3450,6 +3569,8 @@ function renderWorkflowDetail() {
     renderWorkflowCropDetail(step);
   } else if (step.type === "normal") {
     renderWorkflowNormalDetail(step);
+  } else if (step.type === "split") {
+    renderWorkflowSplitDetail(step);
   } else if (step.type === "export") {
     renderWorkflowExportDetail(step);
   } else if (step.type === "rename") {
@@ -5640,6 +5761,18 @@ def split_options_from_form(form: cgi.FieldStorage) -> dict[str, dict[str, str]]
     }
 
 
+def split_options_from_value(raw_value: object) -> dict[str, dict[str, str]]:
+    defaults = {"l": "{name}_L", "r": "{name}_R", "g": "{name}_G", "b": "{name}_B", "a": "{name}_A"}
+    raw = raw_value if isinstance(raw_value, dict) else {}
+    return {
+        key: {
+            "enabled": "0" if isinstance(raw.get(key), dict) and raw[key].get("enabled") in (False, "0", 0) else "1",
+            "name": str(raw.get(key, {}).get("name", defaults[key])) if isinstance(raw.get(key), dict) else defaults[key],
+        }
+        for key in ("l", "r", "g", "b", "a")
+    }
+
+
 def merge_specs_from_form(form: cgi.FieldStorage) -> dict[str, dict[str, str]]:
     specs: dict[str, dict[str, str]] = {}
     for key, fallback in (("r", "default0"), ("g", "default0"), ("b", "default0"), ("a", "default255")):
@@ -6984,7 +7117,6 @@ def normalized_output_format(value: object, allow_keep: bool = True, fallback: s
 
 WORKFLOW_PREVIEW_UNSUPPORTED_LABELS = {
     "pbr": "PBR辅助生成",
-    "split": "通道拆分",
     "merge": "通道合并/打包",
 }
 
@@ -7021,6 +7153,8 @@ def workflow_source_items(paths: list[Path]) -> list[dict[str, object]]:
         with Image.open(source) as opened:
             image = ImageOps.exif_transpose(opened)
             texture_type, _detected_token = detect_texture_type(source.stem, True)
+            has_alpha = core.image_has_alpha(image)
+            image_mode = "LA" if core.is_gray_mode(image) and has_alpha else "L" if core.is_gray_mode(image) else "RGBA" if has_alpha else "RGB"
             items.append(
                 {
                     "source_path": source,
@@ -7033,6 +7167,8 @@ def workflow_source_items(paths: list[Path]) -> list[dict[str, object]]:
                     "texture_type": texture_type,
                     "notes": [],
                     "image_ops": [],
+                    "image_mode": image_mode,
+                    "has_alpha": has_alpha,
                     "resize_applied": False,
                     "crop_applied": False,
                     "resize_profile": "detail",
@@ -7139,6 +7275,8 @@ def workflow_apply_normal_step(items: list[dict[str, object]], options: dict[str
                     "invert": invert,
                 },
             ]
+            item["image_mode"] = "L"
+            item["has_alpha"] = False
             if output_format != "keep":
                 item["ext"] = output_format
             item["notes"] = [
@@ -7156,9 +7294,70 @@ def workflow_apply_normal_step(items: list[dict[str, object]], options: dict[str
             *item.get("image_ops", []),
             {"op": "normal", "strength": strength, "flip_g": flip_g},
         ]
+        has_alpha = bool(item.get("has_alpha", False))
+        item["image_mode"] = "RGBA" if has_alpha else "RGB"
+        item["has_alpha"] = has_alpha
         if output_format != "keep":
             item["ext"] = output_format
         item["notes"] = [*item.get("notes", []), f"法线 {normal_label} 强度 {strength:g}"]
+
+
+def workflow_split_available_channels(item: dict[str, object]) -> list[tuple[str, str]]:
+    mode = str(item.get("image_mode", "RGB")).upper()
+    if mode == "L":
+        return [("l", "L")]
+    if mode == "LA":
+        return [("l", "L"), ("a", "A")]
+    if mode == "RGBA":
+        return [("r", "R"), ("g", "G"), ("b", "B"), ("a", "A")]
+    return [("r", "R"), ("g", "G"), ("b", "B")]
+
+
+def workflow_split_stem(
+    item: dict[str, object],
+    template: str,
+    channel_label: str,
+    format_name: str,
+) -> str:
+    source = item.get("source_path")
+    if not isinstance(source, Path):
+        raise ValueError("工作流通道拆分来源无效")
+    current_stem = safe_stem(str(item.get("stem", source.stem)), source.stem)
+    current_ext = normalized_output_format(
+        format_name if format_name != "keep" else item.get("ext", source.suffix.lstrip(".").lower()),
+        allow_keep=False,
+        fallback=source.suffix.lstrip(".").lower() or "png",
+    )
+    value = (template or "").strip() or "{name}_{channel}"
+    value = value.replace("{name}", current_stem).replace("{channel}", channel_label).replace("{ext}", current_ext)
+    return safe_stem(value, f"{current_stem}_{channel_label}")
+
+
+def workflow_split_items(items: list[dict[str, object]], options: dict[str, object]) -> list[dict[str, object]]:
+    output_format = normalized_output_format(options.get("format", "keep"), allow_keep=True, fallback="keep")
+    split_options = split_options_from_value(options.get("channels", {}))
+    split_items: list[dict[str, object]] = []
+    for item in items:
+        available = workflow_split_available_channels(item)
+        for key, label in available:
+            spec = split_options[key]
+            if spec["enabled"] != "1":
+                continue
+            next_item = dict(item)
+            next_item["image_ops"] = [
+                *item.get("image_ops", []),
+                {"op": "split", "channel": key},
+            ]
+            next_item["image_mode"] = "L"
+            next_item["has_alpha"] = False
+            next_item["stem"] = workflow_split_stem(item, spec["name"], label, output_format)
+            if output_format != "keep":
+                next_item["ext"] = output_format
+            next_item["notes"] = [*item.get("notes", []), f"拆分 {label}"]
+            split_items.append(next_item)
+    if not split_items:
+        raise ValueError("工作流通道拆分步骤没有启用可输出的通道")
+    return split_items
 
 
 def workflow_crop_output_stem(
@@ -7323,6 +7522,8 @@ def workflow_output_items(
             items = workflow_crop_items(items, options)
         elif step_type == "normal":
             workflow_apply_normal_step(items, options)
+        elif step_type == "split":
+            items = workflow_split_items(items, options)
         elif step_type == "export":
             workflow_apply_export_step(items, options)
         elif step_type == "rename":
@@ -7463,6 +7664,8 @@ def save_workflow_item(item: dict[str, object], source: Path, destination: Path,
                 clamp_float(float(operation.get("gamma", 1.0)), 0.2, 3.0),
                 clamp_float(float(operation.get("curve", 0.0)), -1.0, 1.0),
             )
+        elif op_type == "split":
+            image = extract_channel_image(image, str(operation.get("channel", "l"))).convert("L")
 
     if not image_ops and item.get("resize_applied"):
         size = item.get("size", image.size)
