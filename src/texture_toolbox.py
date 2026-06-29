@@ -1951,7 +1951,6 @@ button:disabled { opacity: .55; cursor: not-allowed; }
               <option value="export">格式与压缩</option>
               <option value="crop">图片裁切</option>
               <option value="normal">法线/黑白调整</option>
-              <option value="pbr">PBR辅助生成</option>
               <option value="split">通道拆分</option>
               <option value="merge">通道合并/打包</option>
               <option value="rename">命名规则</option>
@@ -2574,8 +2573,8 @@ const workflowStepDefinitions = {
   },
   pbr: {
     label: "PBR辅助生成",
-    summary: "从 Color/Normal/Height 生成辅助贴图。",
-    detail: "参数占位：输入类型、输出目标、强度、半径、细节、平滑、效果叠加。"
+    summary: "当前开发轮次暂不纳入工作流推进。",
+    detail: "PBR辅助继续保留在快速工具模式；工作流接入会等后续算法和默认预设单独优化后再恢复。"
   },
   split: {
     label: "通道拆分",
